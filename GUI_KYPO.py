@@ -1,7 +1,10 @@
 import os
+import shutil
+
 import yaml
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+
 
 # ---------------------- Existing Utility Functions ---------------------- #
 def generate_topology(name, hosts, routers, networks, net_mappings, router_mappings, groups):
@@ -9,12 +12,11 @@ def generate_topology(name, hosts, routers, networks, net_mappings, router_mappi
     Generate a topology dictionary and dump it to YAML.
     - If 'hidden' is False, do not include it in the YAML.
     """
-    # Remove "hidden": False from each host
     filtered_hosts = []
     for h in hosts:
         host_copy = dict(h)
         if not host_copy.get("hidden"):
-            host_copy.pop("hidden", None)  # remove the key if it's False
+            host_copy.pop("hidden", None)  # remove "hidden" if it's False
         filtered_hosts.append(host_copy)
 
     topology = {
@@ -24,25 +26,29 @@ def generate_topology(name, hosts, routers, networks, net_mappings, router_mappi
         'networks': networks,
         'net_mappings': net_mappings,
         'router_mappings': router_mappings,
-        'groups': [{'name': group['name'], 'nodes': group['hosts']} for group in groups] if groups else []
+        'groups': [
+            {'name': group['name'], 'nodes': group['hosts']}
+            for group in groups
+        ] if groups else []
     }
     return yaml.dump(topology, sort_keys=False)
 
+
 def create_directories(base_dir, hosts):
     """
-    Create provisioning/roles/<host_name> subdirectories.
+    Create provisioning/roles/<host_name> subdirectories (files, tasks, vars).
     """
     provisioning_dir = os.path.join(base_dir, 'provisioning')
     roles_dir = os.path.join(provisioning_dir, 'roles')
     os.makedirs(roles_dir, exist_ok=True)
 
     for host in hosts:
-        # If 'hidden' was omitted or is False, that doesn't affect folder creation
         host_dir = os.path.join(roles_dir, host['name'])
         os.makedirs(host_dir, exist_ok=True)
 
         for sub_dir in ['files', 'tasks', 'vars']:
             os.makedirs(os.path.join(host_dir, sub_dir), exist_ok=True)
+
 
 def save_requirements(base_dir):
     """
@@ -79,6 +85,7 @@ def save_requirements(base_dir):
     with open(requirements_file, 'w') as file:
         file.write(requirements_content)
 
+
 def save_topology(name, hosts, routers, networks, net_mappings, router_mappings, groups):
     """
     Save topology.yml under <base_dir>.
@@ -95,19 +102,17 @@ def save_topology(name, hosts, routers, networks, net_mappings, router_mappings,
     save_requirements(base_dir)
     return output_file
 
+
 def save_containers(base_dir, containers, container_mappings):
     """
-    Save containers.yml in <base_dir> with numeric ports (no quotes).
+    Save containers.yml in <base_dir>, ensuring numeric ports (no quotes).
     """
-    # Convert port to int so YAML doesn't surround it with quotes
     numeric_mappings = []
     for m in container_mappings:
         mapping_copy = dict(m)
-        # Attempt to convert to int
         try:
             mapping_copy["port"] = int(mapping_copy["port"])
         except ValueError:
-            # If invalid integer, fallback to storing as string
             pass
         numeric_mappings.append(mapping_copy)
 
@@ -126,37 +131,21 @@ class TopologyApp:
     def __init__(self, root):
         self.root = root
         self.root.title("CYBERCOR Topology Generator")
-        self.root.geometry("1920x1080")
-
-        # Use the same background color you specified
+        # 3) Maximized window:
+        self.root.state("zoomed")
         self.root.configure(background="#00304E")
 
-        # ---------------------- Scrollable Frame Setup ---------------------- #
-        container = ttk.Frame(self.root)
-        container.pack(fill="both", expand=True)
-
-        self.canvas = tk.Canvas(container, background="#00304E", highlightthickness=0)
-        self.canvas.pack(side="left", fill="both", expand=True)
-
-        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
-        scrollbar.pack(side="right", fill="y")
-
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-
-        # A frame that will hold all main widgets
-        self.main_frame = tk.Frame(self.canvas, bg="#00304E")
-        self.canvas.create_window((0, 0), window=self.main_frame, anchor="nw")
-
-        self.main_frame.bind("<Configure>", self.on_frame_configure)
-
-        # ---------------------- Data Variables ---------------------- #
+        # 1) Data variables
         self.name = tk.StringVar()
 
         self.available_images = [
-            "Win10_x86-64", "alpine", "cirros", "debian", "debian-10", "debian-10-x86_64", "debian-11",
-            "debian-11-man", "debian-11-x86_64", "debian-12.7", "debian-9-x86_64", "kali", "ubuntu-focal-x86_64",
-            "xubuntu-18.04", "debian-11-man-preinstalled", "centos-7.9", "cirros-0-x86_64", "debian-9-x86_64",
-            "debian-10-x86_64", "kali-2020.4", "ubuntu-bionic-x86_64", "windows-10", "windows-server-2019"
+            "Win10_x86-64", "alpine", "cirros", "debian", "debian-10",
+            "debian-10-x86_64", "debian-11", "debian-11-man",
+            "debian-11-x86_64", "debian-12.7", "debian-9-x86_64",
+            "kali", "ubuntu-focal-x86_64", "xubuntu-18.04",
+            "debian-11-man-preinstalled", "centos-7.9", "cirros-0-x86_64",
+            "debian-9-x86_64", "debian-10-x86_64", "kali-2020.4",
+            "ubuntu-bionic-x86_64", "windows-10", "windows-server-2019"
         ]
         self.available_flavors = [
             "csirtmu.medium4x8", "csirtmu.tiny1x2", "m1.large", "m1.large2",
@@ -166,7 +155,7 @@ class TopologyApp:
         ]
         self.available_users = ["debian", "windows", "ubuntu", "cirros", "centos"]
 
-        # Topology data
+        # 2) Topology data
         self.hosts = []
         self.routers = []
         self.networks = []
@@ -174,25 +163,47 @@ class TopologyApp:
         self.router_mappings = []
         self.groups = []
 
-        # Container data
+        # 3) Container data
         self.containers = []
         self.container_mappings = []
 
-        # A Notebook for Folders/Files
-        self.files_notebook = None
-        self.tabs_dict = {}  # store references to folder/file tabs
+        # 4) Build UI
+        self.create_scrollable_container()
+        self.build_main_content()
 
-        # ---------------------- Build Widgets ---------------------- #
-        self.create_widgets()
+    def create_scrollable_container(self):
+        """
+        A scrollable area to hold our top-level Notebook (and input widgets).
+        Also bind PgUp/PgDn to scroll the canvas.
+        """
+        container = ttk.Frame(self.root)
+        container.pack(fill="both", expand=True)
+
+        self.canvas = tk.Canvas(container, bg="#00304E", highlightthickness=0)
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        # A frame inside the canvas to hold all main widgets
+        self.main_frame = tk.Frame(self.canvas, bg="#00304E")
+        self.canvas.create_window((0, 0), window=self.main_frame, anchor="nw")
+
+        self.main_frame.bind("<Configure>", self.on_frame_configure)
+
+        # 5) Scrollbar from the whole app will react with PgUp/PgDn
+        self.root.bind("<Down>", lambda e: self.canvas.yview_scroll(1, "pages"))  # Page Down
+        self.root.bind("<Up>", lambda e: self.canvas.yview_scroll(-1, "pages"))  # Page Up
 
     def on_frame_configure(self, event):
-        """
-        Reset the scroll region to encompass the inner frame.
-        """
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def create_widgets(self):
-        # ---------------------- Style for Combobox ---------------------- #
+    def build_main_content(self):
+        """
+        Construct the 'topology input' + 'Generate' button, plus the top-level Notebook.
+        """
         style = ttk.Style()
         style.theme_use("default")
         style.configure(
@@ -212,25 +223,62 @@ class TopologyApp:
             selectbackground=[("readonly", "#555555")],
         )
 
-        # ---------------------- Title ---------------------- #
-        title_label = tk.Label(
+        # Top Title
+        tk.Label(
             self.main_frame, text="CYBERCOR Topology Generator",
             font=("Helvetica", 16, "bold"),
             bg="#00304E", fg="#39FF14", pady=10
+        ).pack(fill="x")
+
+        # Topology name
+        name_frame = tk.Frame(self.main_frame, bg="#00304E")
+        name_frame.pack(fill="x", pady=5)
+        tk.Label(
+            name_frame, text="Topology Name:", font=("Helvetica", 12),
+            bg="#00304E", fg="#39FF14"
+        ).pack(side="left", padx=5)
+
+        tk.Entry(
+            name_frame, textvariable=self.name, font=("Helvetica", 12),
+            width=30, bg="#333333", fg="white", insertbackground="white"
+        ).pack(side="left", padx=5)
+
+        # Host / Router / etc. config buttons
+        self.build_add_host_section()
+        self.build_add_router_section()
+        self.build_add_network_section()
+        self.build_add_mappings_section()
+        self.build_add_groups_section()
+        self.build_container_sections()
+
+        # Generate Button
+        gen_button = tk.Button(
+            self.main_frame, text="Generate Topology",
+            command=self.generate_topology,
+            bg="#214f07", fg="white", activebackground="#39FF14",
+            activeforeground="white"
         )
-        title_label.grid(row=0, column=5, columnspan=10, sticky="ew")
+        gen_button.pack(fill="x", padx=10, pady=10)
 
-        # ---------------------- Topology Name ---------------------- #
-        tk.Label(self.main_frame, text="Topology Name:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+    # ---------------------------------------------------------------------
+    # A small helper to handle mouse wheel scrolling on listboxes
+    # ---------------------------------------------------------------------
+    def _on_mousewheel(self, event, widget):
+        """
+        For Windows: event.delta is multiples of 120. For Mac, you might need a different approach.
+        """
+        widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"
 
-        tk.Entry(self.main_frame, textvariable=self.name, font=("Helvetica", 12),
-                 width=30, bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=1, column=1, columnspan=3, sticky="ew", padx=10, pady=5)
+    # ---------------------------------------------------------------------
+    # Below: widget builders for each section
+    # ---------------------------------------------------------------------
+    def build_add_host_section(self):
+        sec = tk.Frame(self.main_frame, bg="#00304E")
+        sec.pack(fill="x", pady=10)
 
-        # ---------------------- Host Section ---------------------- #
-        tk.Label(self.main_frame, text="Add Host", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=2, column=0, sticky="w", padx=10, pady=5)
+        tk.Label(sec, text="Add Host", font=("Helvetica", 12), bg="#00304E", fg="#39FF14").grid(row=0, column=0,
+                                                                                                sticky="w")
 
         self.host_name = tk.StringVar()
         self.host_image = tk.StringVar(value=self.available_images[0])
@@ -239,404 +287,340 @@ class TopologyApp:
         self.host_hidden = tk.BooleanVar(value=False)
         self.host_docker = tk.BooleanVar(value=False)
 
-        tk.Label(self.main_frame, text="Host Name", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=3, column=0)
-        tk.Entry(self.main_frame, textvariable=self.host_name, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=3, column=1, padx=5, pady=5)
+        # Host Name
+        tk.Label(sec, text="Host Name", bg="#00304E", fg="#39FF14").grid(row=1, column=0, sticky="w")
+        tk.Entry(sec, textvariable=self.host_name, bg="#333333", fg="white", insertbackground="white").grid(row=1,
+                                                                                                            column=1)
 
-        tk.Label(self.main_frame, text="Image", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=3, column=2)
-        ttk.Combobox(self.main_frame, values=self.available_images,
-                     textvariable=self.host_image, width=15,
-                     style="CustomCombobox.TCombobox"
-        ).grid(row=3, column=3, padx=5, pady=5)
+        # Image
+        tk.Label(sec, text="Image", bg="#00304E", fg="#39FF14").grid(row=1, column=2, sticky="w")
+        ttk.Combobox(sec, values=self.available_images, textvariable=self.host_image,
+                     style="CustomCombobox.TCombobox").grid(row=1, column=3)
 
-        tk.Label(self.main_frame, text="Flavor", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=3, column=4)
-        ttk.Combobox(self.main_frame, values=self.available_flavors,
-                     textvariable=self.host_flavor, width=15,
-                     style="CustomCombobox.TCombobox"
-        ).grid(row=3, column=5, padx=5, pady=5)
+        # Flavor
+        tk.Label(sec, text="Flavor", bg="#00304E", fg="#39FF14").grid(row=1, column=4, sticky="w")
+        ttk.Combobox(sec, values=self.available_flavors, textvariable=self.host_flavor,
+                     style="CustomCombobox.TCombobox").grid(row=1, column=5)
 
-        tk.Label(self.main_frame, text="Management User", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=3, column=6)
-        ttk.Combobox(self.main_frame, values=self.available_users,
-                     textvariable=self.host_user, width=15,
-                     style="CustomCombobox.TCombobox"
-        ).grid(row=3, column=7, padx=5, pady=5)
+        # User
+        tk.Label(sec, text="User", bg="#00304E", fg="#39FF14").grid(row=1, column=6, sticky="w")
+        ttk.Combobox(sec, values=self.available_users, textvariable=self.host_user,
+                     style="CustomCombobox.TCombobox").grid(row=1, column=7)
 
-        tk.Checkbutton(self.main_frame, text="Hidden", variable=self.host_hidden,
-                       bg="#00304E", fg="white", selectcolor="#214f07").grid(row=3, column=8, padx=5, pady=5)
+        # Hidden
+        tk.Checkbutton(sec, text="Hidden", variable=self.host_hidden, bg="#00304E", fg="white",
+                       selectcolor="#214f07").grid(row=1, column=8, padx=5)
 
-        tk.Checkbutton(self.main_frame, text="Docker", variable=self.host_docker,
-                       bg="#00304E", fg="white", selectcolor="#214f07").grid(row=3, column=10, padx=5, pady=5)
+        # Docker
+        tk.Checkbutton(sec, text="Docker", variable=self.host_docker, bg="#00304E", fg="white",
+                       selectcolor="#214f07").grid(row=1, column=9, padx=5)
 
-        tk.Button(self.main_frame, text="Add Host", command=self.add_host,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=3, column=9, padx=5, pady=5)
+        tk.Button(sec, text="Add Host", command=self.add_host, bg="#214f07", fg="white").grid(row=1, column=10, padx=5)
 
-        # ---------------------- Router Section ---------------------- #
-        tk.Label(self.main_frame, text="Add Router", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=4, column=0, sticky="w", padx=10, pady=5)
+        # Below, a listbox to show added hosts
+        tk.Label(sec, text="Hosts Added:", bg="#00304E", fg="#39FF14").grid(row=2, column=0, sticky="w", pady=(10, 0))
+
+        # 1) Smaller listbox w/ scrollbar
+        host_list_frame = tk.Frame(sec, bg="#00304E")
+        host_list_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
+
+        self.hosts_list = tk.Listbox(host_list_frame, bg="#333333", fg="white", height=4, width=60)
+        self.hosts_list.pack(side="left", fill="both", expand=True)
+
+        hosts_list_scroll = tk.Scrollbar(host_list_frame, orient="vertical", command=self.hosts_list.yview)
+        hosts_list_scroll.pack(side="right", fill="y")
+        self.hosts_list.configure(yscrollcommand=hosts_list_scroll.set)
+
+        # Bind mousewheel
+        self.hosts_list.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.hosts_list))
+
+        # We'll use self.hosts_select in add_groups
+        self.hosts_select = tk.Listbox(sec, selectmode=tk.MULTIPLE, bg="#333333", fg="white", height=2, width=30)
+
+    def build_add_router_section(self):
+        sec = tk.Frame(self.main_frame, bg="#00304E")
+        sec.pack(fill="x", pady=10)
+
+        tk.Label(sec, text="Add Router", font=("Helvetica", 12), bg="#00304E", fg="#39FF14").grid(row=0, column=0,
+                                                                                                  sticky="w")
 
         self.router_name = tk.StringVar()
         self.router_image = tk.StringVar(value=self.available_images[0])
         self.router_flavor = tk.StringVar(value=self.available_flavors[0])
         self.router_user = tk.StringVar(value=self.available_users[0])
 
-        tk.Label(self.main_frame, text="Router Name", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=5, column=0)
-        tk.Entry(self.main_frame, textvariable=self.router_name, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=5, column=1, padx=5, pady=5)
+        tk.Label(sec, text="Router Name", bg="#00304E", fg="#39FF14").grid(row=1, column=0, sticky="w")
+        tk.Entry(sec, textvariable=self.router_name, bg="#333333", fg="white").grid(row=1, column=1)
 
-        tk.Label(self.main_frame, text="Image", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=5, column=2)
-        ttk.Combobox(self.main_frame, values=self.available_images,
-                     textvariable=self.router_image, width=15,
-                     style="CustomCombobox.TCombobox"
-        ).grid(row=5, column=3, padx=5, pady=5)
+        tk.Label(sec, text="Image", bg="#00304E", fg="#39FF14").grid(row=1, column=2, sticky="w")
+        ttk.Combobox(sec, values=self.available_images, textvariable=self.router_image,
+                     style="CustomCombobox.TCombobox").grid(row=1, column=3)
 
-        tk.Label(self.main_frame, text="Flavor", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=5, column=4)
-        ttk.Combobox(self.main_frame, values=self.available_flavors,
-                     textvariable=self.router_flavor, width=15,
-                     style="CustomCombobox.TCombobox"
-        ).grid(row=5, column=5, padx=5, pady=5)
+        tk.Label(sec, text="Flavor", bg="#00304E", fg="#39FF14").grid(row=1, column=4, sticky="w")
+        ttk.Combobox(sec, values=self.available_flavors, textvariable=self.router_flavor,
+                     style="CustomCombobox.TCombobox").grid(row=1, column=5)
 
-        tk.Label(self.main_frame, text="Management User", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=5, column=6)
-        ttk.Combobox(self.main_frame, values=self.available_users,
-                     textvariable=self.router_user, width=15,
-                     style="CustomCombobox.TCombobox"
-        ).grid(row=5, column=7, padx=5, pady=5)
+        tk.Label(sec, text="User", bg="#00304E", fg="#39FF14").grid(row=1, column=6, sticky="w")
+        ttk.Combobox(sec, values=self.available_users, textvariable=self.router_user,
+                     style="CustomCombobox.TCombobox").grid(row=1, column=7)
 
-        tk.Button(self.main_frame, text="Add Router", command=self.add_router,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=5, column=8, padx=5, pady=5)
+        tk.Button(sec, text="Add Router", command=self.add_router, bg="#214f07", fg="white").grid(row=1, column=8,
+                                                                                                  padx=5)
 
-        # ---------------------- Network Section ---------------------- #
-        tk.Label(self.main_frame, text="Add Network", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=6, column=0, sticky="w", padx=10, pady=5)
+        tk.Label(sec, text="Routers Added:", bg="#00304E", fg="#39FF14").grid(row=2, column=0, sticky="w", pady=(10, 0))
+
+        router_list_frame = tk.Frame(sec, bg="#00304E")
+        router_list_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
+
+        self.routers_list = tk.Listbox(router_list_frame, bg="#333333", fg="white", height=4, width=60)
+        self.routers_list.pack(side="left", fill="both", expand=True)
+
+        routers_list_scroll = tk.Scrollbar(router_list_frame, orient="vertical", command=self.routers_list.yview)
+        routers_list_scroll.pack(side="right", fill="y")
+        self.routers_list.configure(yscrollcommand=routers_list_scroll.set)
+        self.routers_list.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.routers_list))
+
+    def build_add_network_section(self):
+        sec = tk.Frame(self.main_frame, bg="#00304E")
+        sec.pack(fill="x", pady=10)
+
+        tk.Label(sec, text="Add Network", font=("Helvetica", 12), bg="#00304E", fg="#39FF14").grid(row=0, column=0,
+                                                                                                   sticky="w")
 
         self.network_name = tk.StringVar()
         self.network_cidr = tk.StringVar()
         self.network_accessible = tk.BooleanVar(value=False)
 
-        tk.Label(self.main_frame, text="Network Name", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=7, column=0)
-        tk.Entry(self.main_frame, textvariable=self.network_name, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=7, column=1, padx=5, pady=5)
+        tk.Label(sec, text="Name", bg="#00304E", fg="#39FF14").grid(row=1, column=0, sticky="w")
+        tk.Entry(sec, textvariable=self.network_name, bg="#333333", fg="white").grid(row=1, column=1)
 
-        tk.Label(self.main_frame, text="CIDR", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=7, column=2)
-        tk.Entry(self.main_frame, textvariable=self.network_cidr, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=7, column=3, padx=5, pady=5)
+        tk.Label(sec, text="CIDR", bg="#00304E", fg="#39FF14").grid(row=1, column=2, sticky="w")
+        tk.Entry(sec, textvariable=self.network_cidr, bg="#333333", fg="white").grid(row=1, column=3)
 
-        tk.Checkbutton(self.main_frame, text="Accessible", variable=self.network_accessible,
-                       bg="#00304E", fg="white", selectcolor="#214f07").grid(row=7, column=4, padx=5, pady=5)
+        tk.Checkbutton(sec, text="Accessible", variable=self.network_accessible,
+                       bg="#00304E", fg="white", selectcolor="#214f07").grid(row=1, column=4, padx=5)
 
-        tk.Button(self.main_frame, text="Add Network", command=self.add_network,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=7, column=5, padx=5, pady=5)
+        tk.Button(sec, text="Add Network", command=self.add_network,
+                  bg="#214f07", fg="white").grid(row=1, column=5, padx=5)
 
-        # ---------------------- Network Mapping Section ---------------------- #
-        tk.Label(self.main_frame, text="Add Network Mapping", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=8, column=0, sticky="w", padx=10, pady=5)
+        tk.Label(sec, text="Networks Added:", bg="#00304E", fg="#39FF14").grid(row=2, column=0, sticky="w",
+                                                                               pady=(10, 0))
+
+        network_list_frame = tk.Frame(sec, bg="#00304E")
+        network_list_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
+
+        self.networks_list = tk.Listbox(network_list_frame, bg="#333333", fg="white", height=4, width=60)
+        self.networks_list.pack(side="left", fill="both", expand=True)
+
+        networks_list_scroll = tk.Scrollbar(network_list_frame, orient="vertical", command=self.networks_list.yview)
+        networks_list_scroll.pack(side="right", fill="y")
+        self.networks_list.configure(yscrollcommand=networks_list_scroll.set)
+        self.networks_list.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.networks_list))
+
+    def build_add_mappings_section(self):
+        sec = tk.Frame(self.main_frame, bg="#00304E")
+        sec.pack(fill="x", pady=10)
+
+        # For Network Mappings
+        tk.Label(sec, text="Add Network Mapping", font=("Helvetica", 12),
+                 bg="#00304E", fg="#39FF14").grid(row=0, column=0, sticky="w")
 
         self.net_host = tk.StringVar()
         self.net_network = tk.StringVar()
         self.net_last_octet = tk.StringVar()
 
-        tk.Label(self.main_frame, text="Host", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=9, column=0)
-        self.net_host_dropdown = ttk.Combobox(self.main_frame, textvariable=self.net_host,
-                                              values=[], width=15, style="CustomCombobox.TCombobox")
-        self.net_host_dropdown.grid(row=9, column=1, padx=5, pady=5)
+        tk.Label(sec, text="Host:", bg="#00304E", fg="#39FF14").grid(row=1, column=0, sticky="e")
+        self.net_host_dropdown = ttk.Combobox(sec, textvariable=self.net_host, style="CustomCombobox.TCombobox")
+        self.net_host_dropdown.grid(row=1, column=1, padx=5)
 
-        tk.Label(self.main_frame, text="Network", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=9, column=2)
-        self.net_network_dropdown = ttk.Combobox(self.main_frame, textvariable=self.net_network,
-                                                 values=[], width=15, style="CustomCombobox.TCombobox")
-        self.net_network_dropdown.grid(row=9, column=3, padx=5, pady=5)
+        tk.Label(sec, text="Network:", bg="#00304E", fg="#39FF14").grid(row=1, column=2, sticky="e")
+        self.net_network_dropdown = ttk.Combobox(sec, textvariable=self.net_network, style="CustomCombobox.TCombobox")
+        self.net_network_dropdown.grid(row=1, column=3, padx=5)
 
-        tk.Label(self.main_frame, text="Last Octet", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=9, column=4)
-        tk.Entry(self.main_frame, textvariable=self.net_last_octet, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=9, column=5, padx=5, pady=5)
+        tk.Label(sec, text="Last Octet:", bg="#00304E", fg="#39FF14").grid(row=1, column=4, sticky="e")
+        tk.Entry(sec, textvariable=self.net_last_octet, bg="#333333", fg="white").grid(row=1, column=5, padx=5)
 
-        tk.Button(self.main_frame, text="Add Network Mapping",
-                  command=self.add_network_mapping,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=9, column=6, padx=5, pady=5)
+        tk.Button(sec, text="Add Mapping", command=self.add_network_mapping,
+                  bg="#214f07", fg="white").grid(row=1, column=6, padx=5)
 
-        # ---------------------- Router Mapping Section ---------------------- #
-        tk.Label(self.main_frame, text="Add Router Mapping", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=10, column=0, sticky="w", padx=10, pady=5)
+        mapping_list_frame = tk.Frame(sec, bg="#00304E")
+        mapping_list_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
+
+        self.network_mappings_list = tk.Listbox(mapping_list_frame, bg="#333333", fg="white", height=4, width=60)
+        self.network_mappings_list.pack(side="left", fill="both", expand=True)
+
+        netmap_scroll = tk.Scrollbar(mapping_list_frame, orient="vertical", command=self.network_mappings_list.yview)
+        netmap_scroll.pack(side="right", fill="y")
+        self.network_mappings_list.configure(yscrollcommand=netmap_scroll.set)
+        self.network_mappings_list.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.network_mappings_list))
+
+        # For Router Mappings
+        tk.Label(sec, text="Add Router Mapping", font=("Helvetica", 12),
+                 bg="#00304E", fg="#39FF14").grid(row=3, column=0, sticky="w")
 
         self.router_host = tk.StringVar()
         self.router_network = tk.StringVar()
 
-        tk.Label(self.main_frame, text="Router", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=11, column=0)
-        self.router_host_dropdown = ttk.Combobox(self.main_frame, textvariable=self.router_host,
-                                                 values=[], width=15, style="CustomCombobox.TCombobox")
-        self.router_host_dropdown.grid(row=11, column=1, padx=5, pady=5)
+        tk.Label(sec, text="Router:", bg="#00304E", fg="#39FF14").grid(row=4, column=0, sticky="e")
+        self.router_host_dropdown = ttk.Combobox(sec, textvariable=self.router_host,
+                                                 style="CustomCombobox.TCombobox")
+        self.router_host_dropdown.grid(row=4, column=1, padx=5)
 
-        tk.Label(self.main_frame, text="Network", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=11, column=2)
-        self.router_network_dropdown = ttk.Combobox(self.main_frame, textvariable=self.router_network,
-                                                    values=[], width=15, style="CustomCombobox.TCombobox")
-        self.router_network_dropdown.grid(row=11, column=3, padx=5, pady=5)
+        tk.Label(sec, text="Network:", bg="#00304E", fg="#39FF14").grid(row=4, column=2, sticky="e")
+        self.router_network_dropdown = ttk.Combobox(sec, textvariable=self.router_network,
+                                                    style="CustomCombobox.TCombobox")
+        self.router_network_dropdown.grid(row=4, column=3, padx=5)
 
-        tk.Button(self.main_frame, text="Add Router Mapping",
-                  command=self.add_router_mapping,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=11, column=4, padx=5, pady=5)
+        tk.Button(sec, text="Add Router Mapping", command=self.add_router_mapping,
+                  bg="#214f07", fg="white").grid(row=4, column=4, padx=5)
 
-        # ---------------------- Groups Section ---------------------- #
-        tk.Label(self.main_frame, text="Add Group", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=12, column=0, sticky="w", padx=10, pady=5)
+        router_list_frame = tk.Frame(sec, bg="#00304E")
+        router_list_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
+
+        self.router_mappings_list = tk.Listbox(router_list_frame, bg="#333333", fg="white", height=4, width=60)
+        self.router_mappings_list.pack(side="left", fill="both", expand=True)
+
+        routermap_scroll = tk.Scrollbar(router_list_frame, orient="vertical", command=self.router_mappings_list.yview)
+        routermap_scroll.pack(side="right", fill="y")
+        self.router_mappings_list.configure(yscrollcommand=routermap_scroll.set)
+        self.router_mappings_list.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.router_mappings_list))
+
+    def build_add_groups_section(self):
+        sec = tk.Frame(self.main_frame, bg="#00304E")
+        sec.pack(fill="x", pady=10)
+
+        tk.Label(sec, text="Add Group", font=("Helvetica", 12),
+                 bg="#00304E", fg="#39FF14").grid(row=0, column=0, sticky="w", pady=5)
 
         self.group_name = tk.StringVar()
-        tk.Label(self.main_frame, text="Group Name", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=13, column=0)
-        tk.Entry(self.main_frame, textvariable=self.group_name, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=13, column=1, padx=5, pady=5)
+        tk.Label(sec, text="Group Name:", font=("Helvetica", 12),
+                 bg="#00304E", fg="#39FF14").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        tk.Entry(sec, textvariable=self.group_name, width=15,
+                 bg="#333333", fg="white", insertbackground="white").grid(row=1, column=1, padx=5, pady=5)
 
-        tk.Label(self.main_frame, text="Select Hosts", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=13, column=2)
-        self.hosts_select = tk.Listbox(self.main_frame, selectmode=tk.MULTIPLE,
-                                       bg="#333333", fg="white", height=3, width=30)
-        self.hosts_select.grid(row=13, column=3, padx=5, pady=5)
+        tk.Label(sec, text="Select Hosts:", font=("Helvetica", 12),
+                 bg="#00304E", fg="#39FF14").grid(row=1, column=2, sticky="e", padx=5, pady=5)
 
-        tk.Button(self.main_frame, text="Add Group", command=self.add_groups,
+        hosts_select_frame = tk.Frame(sec, bg="#00304E")
+        hosts_select_frame.grid(row=1, column=3, padx=5, pady=5, sticky="nsew")
+
+        self.hosts_select = tk.Listbox(hosts_select_frame, selectmode=tk.MULTIPLE,
+                                       bg="#333333", fg="white", height=4, width=30)
+        self.hosts_select.pack(side="left", fill="both", expand=True)
+
+        hosts_select_scroll = tk.Scrollbar(hosts_select_frame, orient="vertical", command=self.hosts_select.yview)
+        hosts_select_scroll.pack(side="right", fill="y")
+        self.hosts_select.configure(yscrollcommand=hosts_select_scroll.set)
+        self.hosts_select.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.hosts_select))
+
+        tk.Button(sec, text="Add Group", command=self.add_groups,
                   bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=13, column=4, padx=5, pady=5)
+                  activeforeground="white").grid(row=1, column=4, padx=5, pady=5)
 
-        # ---------------------- Container Section ---------------------- #
-        self.containers_frame = tk.Frame(self.main_frame, bg="#00304E")
-        self.containers_frame.grid(row=14, column=0, columnspan=7, sticky="ew", padx=10, pady=5)
+        groups_list_frame = tk.Frame(sec, bg="#00304E")
+        groups_list_frame.grid(row=2, column=0, columnspan=5, sticky="nsew", padx=10, pady=5)
 
-        tk.Label(self.containers_frame, text="Add Container", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=0, column=0, sticky="w", padx=10, pady=3)
+        self.groups_list = tk.Listbox(groups_list_frame, bg="#333333", fg="white", height=4, width=60)
+        self.groups_list.pack(side="left", fill="both", expand=True)
+
+        groups_scroll = tk.Scrollbar(groups_list_frame, orient="vertical", command=self.groups_list.yview)
+        groups_scroll.pack(side="right", fill="y")
+        self.groups_list.configure(yscrollcommand=groups_scroll.set)
+        self.groups_list.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.groups_list))
+
+    def build_container_sections(self):
+        sec = tk.Frame(self.main_frame, bg="#00304E")
+        sec.pack(fill="x", pady=10)
+
+        tk.Label(sec, text="Add Container", font=("Helvetica", 12),
+                 bg="#00304E", fg="#39FF14").grid(row=0, column=0, sticky="w")
 
         self.container_name = tk.StringVar()
         self.container_image = tk.StringVar(value=self.available_images[0])
         self.container_dockerfile = tk.StringVar()
 
-        tk.Label(self.containers_frame, text="Container Name", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=1, column=0)
-        tk.Entry(self.containers_frame, textvariable=self.container_name, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=1, column=1, padx=5, pady=3)
+        tk.Label(sec, text="Name:", bg="#00304E", fg="#39FF14").grid(row=1, column=0, sticky="w")
+        tk.Entry(sec, textvariable=self.container_name, bg="#333333", fg="white").grid(row=1, column=1, padx=5)
 
-        tk.Label(self.containers_frame, text="Select Image", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=1, column=2)
-        ttk.Combobox(self.containers_frame, values=self.available_images,
-                     textvariable=self.container_image, width=15,
-                     style="CustomCombobox.TCombobox"
-        ).grid(row=1, column=3, padx=5, pady=3)
+        tk.Label(sec, text="Image:", bg="#00304E", fg="#39FF14").grid(row=1, column=2, sticky="w")
+        ttk.Combobox(sec, values=self.available_images, textvariable=self.container_image,
+                     style="CustomCombobox.TCombobox").grid(row=1, column=3, padx=5)
 
-        tk.Label(self.containers_frame, text="Dockerfile", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=1, column=4)
-        tk.Entry(self.containers_frame, textvariable=self.container_dockerfile, width=15,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=1, column=5, padx=5, pady=3)
+        tk.Label(sec, text="Dockerfile:", bg="#00304E", fg="#39FF14").grid(row=1, column=4, sticky="w")
+        tk.Entry(sec, textvariable=self.container_dockerfile, bg="#333333", fg="white").grid(row=1, column=5, padx=5)
 
-        tk.Button(self.containers_frame, text="Add Container", command=self.add_container,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=1, column=6, padx=10, pady=3)
+        tk.Button(sec, text="Add Container", command=self.add_container,
+                  bg="#214f07", fg="white").grid(row=1, column=6, padx=5)
 
-        # ---------------------- Container Mappings Section ---------------------- #
-        self.container_mappings_frame = tk.Frame(self.main_frame, bg="#00304E")
-        self.container_mappings_frame.grid(row=15, column=0, columnspan=7, sticky="ew", padx=10, pady=5)
+        containers_list_frame = tk.Frame(sec, bg="#00304E")
+        containers_list_frame.grid(row=2, column=0, columnspan=7, sticky="nsew", padx=10, pady=5)
 
-        tk.Label(self.container_mappings_frame, text="Add Container Mapping", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=0, column=0, sticky="w", padx=10, pady=3)
+        self.containers_list = tk.Listbox(containers_list_frame, bg="#333333", fg="white", height=4, width=60)
+        self.containers_list.pack(side="left", fill="both", expand=True)
+
+        containers_scroll = tk.Scrollbar(containers_list_frame, orient="vertical", command=self.containers_list.yview)
+        containers_scroll.pack(side="right", fill="y")
+        self.containers_list.configure(yscrollcommand=containers_scroll.set)
+        self.containers_list.bind("<MouseWheel>", lambda e: self._on_mousewheel(e, self.containers_list))
+
+        # Container Mappings
+        tk.Label(sec, text="Add Container Mapping", font=("Helvetica", 12),
+                 bg="#00304E", fg="#39FF14").grid(row=3, column=0, sticky="w")
 
         self.mapping_container_var = tk.StringVar()
         self.mapping_port_var = tk.StringVar()
-
-        tk.Label(self.container_mappings_frame, text="Container", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=1, column=0)
-        self.mapping_container_dropdown = ttk.Combobox(
-            self.container_mappings_frame,
-            textvariable=self.mapping_container_var,
-            values=[],
-            width=15,
-            style="CustomCombobox.TCombobox"
-        )
-        self.mapping_container_dropdown.grid(row=1, column=1, padx=5, pady=3)
-
-        tk.Label(self.container_mappings_frame, text="Select Docker Host", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=1, column=2)
         self.docker_host_var = tk.StringVar()
-        self.docker_host_dropdown = ttk.Combobox(
-            self.container_mappings_frame,
-            textvariable=self.docker_host_var,
-            values=[],
-            width=15,
-            style="CustomCombobox.TCombobox"
-        )
-        self.docker_host_dropdown.grid(row=1, column=3, padx=5, pady=3)
 
-        tk.Label(self.container_mappings_frame, text="Port", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=1, column=4)
-        tk.Entry(self.container_mappings_frame, textvariable=self.mapping_port_var, width=8,
-                 bg="#333333", fg="white", insertbackground="white"
-        ).grid(row=1, column=5, padx=5, pady=3)
+        tk.Label(sec, text="Container:", bg="#00304E", fg="#39FF14").grid(row=4, column=0, sticky="e")
+        self.mapping_container_dropdown = ttk.Combobox(sec, textvariable=self.mapping_container_var,
+                                                       style="CustomCombobox.TCombobox")
+        self.mapping_container_dropdown.grid(row=4, column=1, padx=5)
 
-        tk.Button(self.container_mappings_frame, text="Add Container Mapping", command=self.add_container_mapping,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=1, column=6, padx=10, pady=3)
+        tk.Label(sec, text="Docker Host:", bg="#00304E", fg="#39FF14").grid(row=4, column=2, sticky="e")
+        self.docker_host_dropdown = ttk.Combobox(sec, textvariable=self.docker_host_var,
+                                                 style="CustomCombobox.TCombobox")
+        self.docker_host_dropdown.grid(row=4, column=3, padx=5)
 
-        # ---------------------- Generate Topology Button ---------------------- #
-        tk.Button(self.main_frame, text="Generate Topology", command=self.generate_topology,
-                  bg="#214f07", fg="white", activebackground="#39FF14",
-                  activeforeground="white"
-        ).grid(row=16, column=0, columnspan=7, sticky="ew", padx=12, pady=10)
+        tk.Label(sec, text="Port:", bg="#00304E", fg="#39FF14").grid(row=4, column=4, sticky="e")
+        tk.Entry(sec, textvariable=self.mapping_port_var, bg="#333333", fg="white", width=10).grid(row=4, column=5,
+                                                                                                   padx=5)
 
-        # ---------------------- Hosts Listbox ---------------------- #
-        tk.Label(self.main_frame, text="Hosts Added:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=17, column=0, sticky="w", padx=10, pady=5)
-        self.hosts_list = tk.Listbox(self.main_frame, height=2, state="normal",
-                                     bg="#333333", fg="white",
-                                     selectbackground="#444444",
-                                     selectforeground="white")
-        self.hosts_list.grid(row=18, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
-        hosts_scrollbar = tk.Scrollbar(self.main_frame, orient="vertical", command=self.hosts_list.yview)
-        hosts_scrollbar.grid(row=18, column=2, sticky="ns")
-        self.hosts_list.config(yscrollcommand=hosts_scrollbar.set)
+        tk.Button(sec, text="Add Container Mapping", command=self.add_container_mapping,
+                  bg="#214f07", fg="white").grid(row=4, column=6, padx=5)
 
-        # ---------------------- Routers Listbox ---------------------- #
-        tk.Label(self.main_frame, text="Routers Added:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=19, column=0, sticky="w", padx=10, pady=5)
-        self.routers_list = tk.Listbox(self.main_frame, height=2, state="normal",
-                                       bg="#333333", fg="white",
-                                       selectbackground="#444444",
-                                       selectforeground="white")
-        self.routers_list.grid(row=20, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
-        routers_scrollbar = tk.Scrollbar(self.main_frame, orient="vertical", command=self.routers_list.yview)
-        routers_scrollbar.grid(row=20, column=2, sticky="ns")
-        self.routers_list.config(yscrollcommand=routers_scrollbar.set)
+        container_map_frame = tk.Frame(sec, bg="#00304E")
+        container_map_frame.grid(row=5, column=0, columnspan=7, sticky="nsew", padx=10, pady=5)
 
-        # ---------------------- Networks Listbox ---------------------- #
-        tk.Label(self.main_frame, text="Networks Added:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=21, column=0, sticky="w", padx=10, pady=5)
-        self.networks_list = tk.Listbox(self.main_frame, height=2, state="normal",
-                                        bg="#333333", fg="white",
-                                        selectbackground="#444444",
-                                        selectforeground="white")
-        self.networks_list.grid(row=22, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
-        networks_scrollbar = tk.Scrollbar(self.main_frame, orient="vertical", command=self.networks_list.yview)
-        networks_scrollbar.grid(row=22, column=2, sticky="ns")
-        self.networks_list.config(yscrollcommand=networks_scrollbar.set)
+        self.container_mappings_list = tk.Listbox(container_map_frame, bg="#333333", fg="white", height=4, width=60)
+        self.container_mappings_list.pack(side="left", fill="both", expand=True)
 
-        # ---------------------- Network Mappings Listbox ---------------------- #
-        tk.Label(self.main_frame, text="Network Mappings:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=17, column=4, sticky="w", padx=10, pady=5)
-        self.network_mappings_list = tk.Listbox(self.main_frame, height=2, width=50, state="normal",
-                                                bg="#333333", fg="white",
-                                                selectbackground="#444444",
-                                                selectforeground="white")
-        self.network_mappings_list.grid(row=18, column=4, columnspan=2, sticky="nsew", padx=10, pady=5)
-        network_mappings_scrollbar = tk.Scrollbar(self.main_frame, orient="vertical",
-                                                  command=self.network_mappings_list.yview)
-        network_mappings_scrollbar.grid(row=18, column=6, sticky="ns")
-        self.network_mappings_list.config(yscrollcommand=network_mappings_scrollbar.set)
+        containermap_scroll = tk.Scrollbar(container_map_frame, orient="vertical",
+                                           command=self.container_mappings_list.yview)
+        containermap_scroll.pack(side="right", fill="y")
+        self.container_mappings_list.configure(yscrollcommand=containermap_scroll.set)
+        self.container_mappings_list.bind("<MouseWheel>",
+                                          lambda e: self._on_mousewheel(e, self.container_mappings_list))
 
-        # ---------------------- Router Mappings Listbox ---------------------- #
-        tk.Label(self.main_frame, text="Router Mappings:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=19, column=4, sticky="w", padx=10, pady=5)
-        self.router_mappings_list = tk.Listbox(self.main_frame, height=2, width=50, state="normal",
-                                               bg="#333333", fg="white",
-                                               selectbackground="#444444",
-                                               selectforeground="white")
-        self.router_mappings_list.grid(row=20, column=4, columnspan=2, sticky="nsew", padx=10, pady=5)
-        router_mappings_scrollbar = tk.Scrollbar(self.main_frame, orient="vertical",
-                                                 command=self.router_mappings_list.yview)
-        router_mappings_scrollbar.grid(row=20, column=6, sticky="ns")
-        self.router_mappings_list.config(yscrollcommand=router_mappings_scrollbar.set)
-
-        # ---------------------- Groups Listbox ---------------------- #
-        tk.Label(self.main_frame, text="Groups Added:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=21, column=4, sticky="w", padx=10, pady=5)
-        self.groups_list = tk.Listbox(self.main_frame, height=2, state="normal",
-                                      bg="#333333", fg="white",
-                                      selectbackground="#444444",
-                                      selectforeground="white")
-        self.groups_list.grid(row=22, column=4, columnspan=2, sticky="nsew", padx=10, pady=5)
-        groups_scrollbar = tk.Scrollbar(self.main_frame, orient="vertical", command=self.groups_list.yview)
-        groups_scrollbar.grid(row=22, column=6, sticky="ns")
-        self.groups_list.config(yscrollcommand=groups_scrollbar.set)
-
-        # ---------------------- Containers Listbox ---------------------- #
-        tk.Label(self.main_frame, text="Containers Added:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=24, column=0, sticky="w", padx=10, pady=5)
-        self.containers_list = tk.Listbox(self.main_frame, height=2, state="normal",
-                                          bg="#333333", fg="white",
-                                          selectbackground="#444444",
-                                          selectforeground="white")
-        self.containers_list.grid(row=25, column=0, columnspan=2, sticky="nsew", padx=10, pady=5)
-
-        tk.Label(self.main_frame, text="Container Mappings:", font=("Helvetica", 12),
-                 bg="#00304E", fg="#39FF14").grid(row=24, column=4, sticky="w", padx=10, pady=5)
-        self.container_mappings_list = tk.Listbox(self.main_frame, height=2, width=50, state="normal",
-                                                  bg="#333333", fg="white",
-                                                  selectbackground="#444444",
-                                                  selectforeground="white")
-        self.container_mappings_list.grid(row=25, column=4, columnspan=2, sticky="nsew", padx=10, pady=5)
-
-        # ---------------------- Footer ---------------------- #
-        tk.Label(
-            self.main_frame, text="Made by Gabriel Tabacaru for CYBERCOR © 2025",
-            font=("Helvetica", 10), bg="#007acc", fg="white", pady=10
-        ).grid(row=29, column=0, columnspan=10, sticky="ew")
-
-        # Initially hide container frames
-        self.show_or_hide_container_frames()
-
-    # ---------------------- Host Logic ---------------------- #
+    # ---------------------------------------------------------------------
+    # Add Host/Router/Network/Groups/Containers logic
+    # ---------------------------------------------------------------------
     def add_host(self):
-        # Only store 'hidden' if True
         host = {
             "name": self.host_name.get().strip(),
             "base_box": {
                 "image": self.host_image.get().strip(),
                 "man_user": self.host_user.get().strip()
             },
-            "flavor": self.host_flavor.get().strip(),
+            "flavor": self.host_flavor.get().strip()
         }
-        # If hidden is True, store it
         if self.host_hidden.get():
             host["hidden"] = True
-
-        # Whether Docker is selected or not, it only affects container logic
-        # but we do store it if we want to check it in show_or_hide_container_frames.
         host["docker"] = self.host_docker.get()
 
         self.hosts.append(host)
-        self.hosts_list.insert(
-            tk.END,
-            f"Host: {host['name']}, Image: {host['base_box']['image']}"
-        )
-        self.hosts_select.insert(tk.END, host["name"])
+        self.hosts_list.insert(tk.END, f"{host['name']} | {host['base_box']['image']}")
+        self.hosts_select.insert(tk.END, host["name"])  # Update the hosts selection Listbox
 
-        # Reset
         self.host_name.set("")
         self.host_image.set(self.available_images[0])
         self.host_flavor.set(self.available_flavors[0])
@@ -645,24 +629,7 @@ class TopologyApp:
         self.host_docker.set(False)
 
         self.refresh_dropdowns()
-        self.show_or_hide_container_frames()
 
-    def show_or_hide_container_frames(self):
-        """
-        Show container frames only if there's at least one host with docker=True.
-        Also refresh Docker host list for container mapping.
-        """
-        docker_hosts = [h["name"] for h in self.hosts if h.get("docker") is True]
-        self.docker_host_dropdown["values"] = docker_hosts
-
-        if docker_hosts:
-            self.containers_frame.grid()            # Show containers frame
-            self.container_mappings_frame.grid()    # Show container mappings frame
-        else:
-            self.containers_frame.grid_remove()     # Hide containers frame
-            self.container_mappings_frame.grid_remove()  # Hide container mappings frame
-
-    # ---------------------- Router Logic ---------------------- #
     def add_router(self):
         router = {
             "name": self.router_name.get().strip(),
@@ -673,11 +640,7 @@ class TopologyApp:
             "flavor": self.router_flavor.get().strip()
         }
         self.routers.append(router)
-        self.routers_list.insert(
-            tk.END, f"Router: {router['name']}, Image: {router['base_box']['image']}"
-        )
-
-        # Reset
+        self.routers_list.insert(tk.END, f"{router['name']} | {router['base_box']['image']}")
         self.router_name.set("")
         self.router_image.set(self.available_images[0])
         self.router_flavor.set(self.available_flavors[0])
@@ -685,7 +648,6 @@ class TopologyApp:
 
         self.refresh_dropdowns()
 
-    # ---------------------- Network Logic ---------------------- #
     def add_network(self):
         network = {
             "name": self.network_name.get().strip(),
@@ -693,11 +655,7 @@ class TopologyApp:
             "accessible_by_user": self.network_accessible.get()
         }
         self.networks.append(network)
-        self.networks_list.insert(
-            tk.END, f"Network: {network['name']}, CIDR: {network['cidr']}"
-        )
-
-        # Reset
+        self.networks_list.insert(tk.END, f"{network['name']} | {network['cidr']}")
         self.network_name.set("")
         self.network_cidr.set("")
         self.network_accessible.set(False)
@@ -706,127 +664,105 @@ class TopologyApp:
 
     def add_network_mapping(self):
         if not self.hosts or not self.networks:
-            messagebox.showerror("Error", "Add hosts and networks first!")
+            messagebox.showerror("Error", "Add hosts/networks first!")
             return
-
         host_name = self.net_host.get().strip()
         network_name = self.net_network.get().strip()
         last_octet = self.net_last_octet.get().strip()
-
-        selected_network = next((n for n in self.networks if n["name"] == network_name), None)
-        if not selected_network:
-            messagebox.showerror("Error", "Invalid network selected!")
+        if not (host_name and network_name and last_octet):
             return
-
-        cidr_prefix = ".".join(selected_network["cidr"].split(".")[:3])
-        ip = f"{cidr_prefix}.{last_octet}"
 
         mapping = {
             "host": host_name,
             "network": network_name,
-            "ip": ip
+            "ip": f"?.?.?.{last_octet}"
         }
-        self.net_mappings.append(mapping)
-        self.network_mappings_list.insert(
-            tk.END,
-            f"Host: {host_name} -> Network: {network_name} (IP: {ip})"
-        )
+        # We'll refine IP calculation
+        net_obj = next((n for n in self.networks if n["name"] == network_name), None)
+        if net_obj and "cidr" in net_obj:
+            cidr_parts = net_obj["cidr"].split(".")
+            if len(cidr_parts) >= 3:
+                prefix = ".".join(cidr_parts[:3])
+                mapping["ip"] = f"{prefix}.{last_octet}"
 
-        # Reset
+        self.net_mappings.append(mapping)
+        self.network_mappings_list.insert(tk.END, f"Host: {host_name} -> {network_name}, ip={mapping['ip']}")
+
         self.net_host.set("")
         self.net_network.set("")
         self.net_last_octet.set("")
 
-    # ---------------------- Router Mapping Logic ---------------------- #
     def add_router_mapping(self):
         if not self.routers or not self.networks:
-            messagebox.showerror("Error", "Add routers and networks first!")
+            messagebox.showerror("Error", "Add routers/networks first!")
             return
-
         router_name = self.router_host.get().strip()
         network_name = self.router_network.get().strip()
-
-        selected_network = next((n for n in self.networks if n["name"] == network_name), None)
-        if not selected_network:
-            messagebox.showerror("Error", "Invalid network selected!")
+        if not (router_name and network_name):
             return
-
-        cidr_prefix = ".".join(selected_network["cidr"].split(".")[:3])
-        ip = f"{cidr_prefix}.1"
 
         mapping = {
             "router": router_name,
             "network": network_name,
-            "ip": ip
+            "ip": "?.?.?.1"
         }
-        self.router_mappings.append(mapping)
-        self.router_mappings_list.insert(
-            tk.END,
-            f"Router: {router_name} -> Network: {network_name} (IP: {ip})"
-        )
+        net_obj = next((n for n in self.networks if n["name"] == network_name), None)
+        if net_obj and "cidr" in net_obj:
+            cidr_parts = net_obj["cidr"].split(".")
+            if len(cidr_parts) >= 3:
+                prefix = ".".join(cidr_parts[:3])
+                mapping["ip"] = f"{prefix}.1"
 
-        # Reset
+        self.router_mappings.append(mapping)
+        self.router_mappings_list.insert(tk.END, f"Router: {router_name} -> {network_name}, ip={mapping['ip']}")
+
         self.router_host.set("")
         self.router_network.set("")
 
-    # ---------------------- Groups Logic ---------------------- #
     def add_groups(self):
         group_name = self.group_name.get().strip()
-        selected_indices = self.hosts_select.curselection()
-        selected_hosts = [self.hosts_select.get(i) for i in selected_indices]
-
         if not group_name:
             messagebox.showerror("Error", "Group name cannot be empty!")
             return
-        if not selected_hosts:
-            messagebox.showerror("Error", "No hosts selected to add to the group!")
+        indices = self.hosts_select.curselection()
+        if not indices:
+            messagebox.showerror("Error", "No hosts selected!")
             return
+        selected_hosts = [self.hosts_select.get(i) for i in indices]
 
         group = {
             "name": group_name,
             "hosts": selected_hosts
         }
         self.groups.append(group)
-        self.groups_list.insert(
-            tk.END, f"Group: {group_name}, Hosts: {', '.join(selected_hosts)}"
-        )
+        self.groups_list.insert(tk.END, f"Group: {group_name}, hosts={', '.join(selected_hosts)}")
 
-        # Reset
         self.group_name.set("")
         self.hosts_select.selection_clear(0, tk.END)
 
-    # ---------------------- Containers Logic ---------------------- #
     def add_container(self):
-        """
-        Add container. If 'dockerfile' is specified, skip 'image'.
-        Also create a directory <dockerfile>/ in the main folder if dockerfile is specified.
-        """
         name = self.container_name.get().strip()
-        image = self.container_image.get().strip()
-        dockerfile = self.container_dockerfile.get().strip()
-
         if not name:
             messagebox.showerror("Error", "Container name cannot be empty!")
             return
+        image = self.container_image.get().strip()
+        dockerfile = self.container_dockerfile.get().strip()
 
-        container_entry = {"name": name}
+        item = {"name": name}
         if dockerfile:
-            container_entry["dockerfile"] = dockerfile
+            item["dockerfile"] = dockerfile
             base_dir = os.path.join(os.getcwd(), self.name.get())
             os.makedirs(base_dir, exist_ok=True)
             dockerfile_dir = os.path.join(base_dir, dockerfile)
             os.makedirs(dockerfile_dir, exist_ok=True)
         else:
-            container_entry["image"] = image
+            item["image"] = image
 
-        self.containers.append(container_entry)
-        self.containers_list.insert(
-            tk.END,
-            f"Container: {name} => " +
-            (f"Dockerfile: {dockerfile}" if dockerfile else f"Image: {image}")
-        )
+        self.containers.append(item)
+        msg = f"Container: {name} => "
+        msg += (f"Dockerfile: {dockerfile}" if dockerfile else f"Image: {image}")
+        self.containers_list.insert(tk.END, msg)
 
-        # Reset
         self.container_name.set("")
         self.container_image.set(self.available_images[0])
         self.container_dockerfile.set("")
@@ -834,69 +770,57 @@ class TopologyApp:
         self.refresh_container_dropdown()
 
     def add_container_mapping(self):
-        """
-        Add container mapping with a single Docker host and numeric port.
-        """
         container_name = self.mapping_container_var.get().strip()
         if not container_name:
             messagebox.showerror("Error", "Select a container!")
             return
-
         docker_host = self.docker_host_var.get().strip()
-        if not docker_host:
-            messagebox.showerror("Error", "Select a Docker host!")
+        port = self.mapping_port_var.get().strip()
+        if not docker_host or not port:
+            messagebox.showerror("Error", "Host or Port missing!")
             return
 
-        port_str = self.mapping_port_var.get().strip()
-        if not port_str:
-            messagebox.showerror("Error", "Port cannot be empty!")
-            return
-
-        mapping = {
-            "container": container_name,
-            "host": docker_host,
-            "port": port_str  # We'll parse as int in save_containers
-        }
+        mapping = {"container": container_name, "host": docker_host, "port": port}
         self.container_mappings.append(mapping)
-        self.container_mappings_list.insert(
-            tk.END, f"Container: {container_name}, Host: {docker_host}, Port: {port_str}"
-        )
+        self.container_mappings_list.insert(tk.END, f"{container_name} -> {docker_host}:{port}")
 
-        # Reset
         self.mapping_container_var.set("")
         self.docker_host_var.set("")
         self.mapping_port_var.set("")
 
+    # ---------------------------------------------------------------------
+    # Refresh / Generate
+    # ---------------------------------------------------------------------
+    def refresh_dropdowns(self):
+        """
+        Refresh host, network, router dropdowns
+        """
+        self.net_host_dropdown["values"] = [h["name"] for h in self.hosts]
+        self.net_network_dropdown["values"] = [n["name"] for n in self.networks]
+        self.router_host_dropdown["values"] = [r["name"] for r in self.routers]
+        self.router_network_dropdown["values"] = [n["name"] for n in self.networks]
+        self.refresh_container_dropdown()
+
     def refresh_container_dropdown(self):
-        """
-        Refresh the container dropdown for container mappings.
-        """
         container_names = [c["name"] for c in self.containers]
         self.mapping_container_dropdown["values"] = container_names
 
-    # ---------------------- Refresh Logic ---------------------- #
-    def refresh_dropdowns(self):
-        """
-        Refresh host, network, and router dropdowns.
-        """
-        self.net_host_dropdown["values"] = [host["name"] for host in self.hosts]
-        self.net_network_dropdown["values"] = [net["name"] for net in self.networks]
-        self.router_host_dropdown["values"] = [router["name"] for router in self.routers]
-        self.router_network_dropdown["values"] = [net["name"] for net in self.networks]
+        # Also update Docker host list
+        docker_hosts = [h["name"] for h in self.hosts if h.get("docker")]
+        self.docker_host_dropdown["values"] = docker_hosts
 
-        self.refresh_container_dropdown()
+    def refresh_hosts_select(self):
+        self.hosts_select.delete(0, tk.END)  # Clear existing entries
+        for host in self.hosts:
+            self.hosts_select.insert(tk.END, host["name"])  # Re-add all host names
 
-    # ---------------------- Generate Topology ---------------------- #
     def generate_topology(self):
-        """
-        Create topology.yml and containers.yml, then build the dynamic notebook for editing folders/files.
-        """
         if not self.name.get().strip():
             messagebox.showerror("Error", "Topology name cannot be empty!")
             return
 
         base_dir = os.path.join(os.getcwd(), self.name.get())
-        output_file = save_topology(
+        topology_file = save_topology(
             self.name.get(),
             self.hosts,
             self.routers,
@@ -906,140 +830,445 @@ class TopologyApp:
             self.groups
         )
 
-        # If we have containers, also create containers.yml
+        containers_file = None
         if self.containers or self.container_mappings:
             containers_file = save_containers(base_dir, self.containers, self.container_mappings)
-            msg = f"Topology saved at: {output_file}\nContainers saved at: {containers_file}"
-        else:
-            msg = f"Topology saved at: {output_file}"
 
-        # Build or rebuild the folder/file notebook
-        self.build_files_notebook(base_dir)
-
+        msg = f"Topology saved at: {topology_file}"
+        if containers_file:
+            msg += f"\nContainers saved at: {containers_file}"
         messagebox.showinfo("Success", msg)
 
-    # ---------------------- Folder/File Notebook Logic ---------------------- #
-    def build_files_notebook(self, base_dir):
+        self.build_top_notebook(base_dir)
+
+    def build_top_notebook(self, base_dir):
+        existing = getattr(self, "top_notebook", None)
+        if existing:
+            existing.destroy()
+
+        self.top_notebook = ttk.Notebook(self.main_frame)
+        self.top_notebook.pack(fill="both", expand=True, pady=10)
+
+        self.build_main_folder_tab(self.top_notebook, base_dir)
+        self.build_dockerfile_tabs(self.top_notebook, base_dir)
+        self.build_provisioning_tab(self.top_notebook, base_dir)
+        self.build_roles_tab(self.top_notebook, base_dir)
+        if getattr(self, 'footer_label', None):
+            self.footer_label.destroy()
+        self.footer_label = tk.Label(
+            self.main_frame,
+            text="Copyright Made by Gabriel Tăbăcaru for CYBERCOR",
+            bg="#00304E", fg="white"
+        )
+        self.footer_label.pack(side='bottom', fill='x', pady=5)
+
+    # ---------------------------------------------------------------------
+    # Build the "top notebook" at the top of the whole app with your tabs:
+    #  1) main_folder
+    #  2) dockerfile_folders
+    #  3) provisioning
+    #     (subtabs: each host, containing subtabs: files, tasks, vars)
+    # ---------------------------------------------------------------------
+    def build_top_notebook(self, base_dir):
         """
-        Create a ttk.Notebook that displays a tab for each folder and file
-        under <base_dir>/provisioning/roles. Allows file upload and inline editing.
+        Create a top-level Notebook with the tabs you require:
+         - Main Folder (topology.yml, containers.yml)
+         - Dockerfiles (one tab per dockerfile folder)
+         - Provisioning (subtabs per host -> files, tasks, vars)
         """
-        # If the notebook already exists, destroy it and rebuild
-        if self.files_notebook:
-            self.files_notebook.destroy()
+        # If we already built a top-level notebook, remove it first
+        existing = getattr(self, "top_notebook", None)
+        if existing:
+            existing.destroy()
 
-        self.files_notebook = ttk.Notebook(self.main_frame)
-        self.files_notebook.configure(style="TNotebook")
-        self.files_notebook.grid(row=30, column=0, columnspan=10, sticky="nsew", padx=10, pady=10)
+        self.top_notebook = ttk.Notebook(self.main_frame)
+        self.top_notebook.pack(fill="both", expand=True, pady=10)
 
-        roles_dir = os.path.join(base_dir, "provisioning", "roles")
-        if not os.path.isdir(roles_dir):
-            return
+        # 1) Tab: main_folder
+        self.build_main_folder_tab(self.top_notebook, base_dir)
 
-        # For each host folder in roles
-        for host_folder in sorted(os.listdir(roles_dir)):
-            host_path = os.path.join(roles_dir, host_folder)
-            if os.path.isdir(host_path):
-                # Create a frame tab for the folder
-                folder_tab = tk.Frame(self.files_notebook, bg="#00304E")
-                self.files_notebook.add(folder_tab, text=f"{host_folder}")
+        # 2) Tab: dockerfile_folders
+        self.build_dockerfile_tabs(self.top_notebook, base_dir)
 
-                # Upload button for new files in this folder
-                upload_btn = tk.Button(
-                    folder_tab, text="Upload File",
-                    command=lambda p=host_path: self.upload_file(p),
-                    bg="#214f07", fg="white", activebackground="#39FF14"
-                )
-                upload_btn.pack(pady=5, anchor="w")
+        # 3) Tab: provisioning (with host subfolders)
+        self.build_provisioning_tab(self.top_notebook, base_dir)
+        # 4) Tab: roles (with host subfolders)
+        self.build_roles_tab(self.top_notebook, base_dir)
+        # 5) Footer label (updated after tabs)
+        if getattr(self, 'footer_label', None):
+            self.footer_label.destroy()
+        self.footer_label = tk.Label(
+            self.main_frame,
+            text="Copyright Made by Gabriel Tăbăcaru for CYBERCOR",
+            bg="#00304E", fg="white"
+        )
+        self.footer_label.pack(side='bottom', fill='x', pady=5)
 
-                # Recursively add subfolders/files
-                self.create_folder_view(folder_tab, host_path)
+    def build_main_folder_tab(self, notebook, base_dir):
+        tab = tk.Frame(notebook, bg="#00304E")
+        notebook.add(tab, text="main_folder")
 
-    def create_folder_view(self, parent_frame, folder_path):
-        """
-        Create sub-tabs or a simple listing for each file in folder_path.
-        If it's a file, add a new sub-tab with an editable text widget.
-        """
-        # We can either list each subfolder or each file. Let's keep it simple:
-        # For each subfolder or file in folder_path, create a sub-tab if it's a file,
-        # or recursively show more content if it's a folder.
+        # Show topology.yml, containers.yml if they exist
+        # plus an "upload file" button to add new files in the main folder
+        upload_btn = tk.Button(tab, text="Upload File",
+                               command=lambda: self.upload_file(base_dir,
+                                                                refresh_call=lambda: self.build_top_notebook(base_dir)),
+                               bg="#214f07", fg="white")
+        upload_btn.pack(anchor="w", pady=5, padx=10)
 
-        # Notebook for the items in this folder
-        folder_notebook = ttk.Notebook(parent_frame)
-        folder_notebook.configure(style="TNotebook")
-        folder_notebook.pack(fill="both", expand=True)
+        # We can show each file in the main folder in a sub-notebook
+        sub_nb = ttk.Notebook(tab)
+        sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
 
-        for item in sorted(os.listdir(folder_path)):
-            item_path = os.path.join(folder_path, item)
-            if os.path.isdir(item_path):
-                # Create a sub-tab for the subfolder
-                subfolder_tab = tk.Frame(folder_notebook, bg="#00304E")
-                folder_notebook.add(subfolder_tab, text=f"[Dir] {item}")
+        # List all items in base_dir
+        for item in sorted(os.listdir(base_dir)):
+            item_path = os.path.join(base_dir, item)
+            # If it's a file, create a tab
+            if os.path.isfile(item_path):
+                file_tab = tk.Frame(sub_nb, bg="#00304E")
+                sub_nb.add(file_tab, text=item)
 
-                # A button to upload inside subfolder
-                upload_btn = tk.Button(
-                    subfolder_tab, text="Upload File",
-                    command=lambda p=item_path: self.upload_file(p),
-                    bg="#214f07", fg="white", activebackground="#39FF14"
-                )
-                upload_btn.pack(pady=5, anchor="w")
+                txt = tk.Text(file_tab, wrap="word", bg="#333333", fg="white")
+                txt.pack(fill="both", expand=True)
 
-                # Recursively show contents
-                self.create_folder_view(subfolder_tab, item_path)
-
-            else:
-                # It's a file, create a tab with a text widget
-                file_tab = tk.Frame(folder_notebook, bg="#00304E")
-                folder_notebook.add(file_tab, text=item)
-                # A text widget for editing
-                text_widget = tk.Text(file_tab, wrap="word", bg="#333333", fg="white")
-                text_widget.pack(fill="both", expand=True)
-
-                # Load file contents
+                # Load the file
                 try:
                     with open(item_path, "r", encoding="utf-8") as f:
                         content = f.read()
-                    text_widget.insert("1.0", content)
+                    txt.insert("1.0", content)
                 except Exception as e:
-                    text_widget.insert("1.0", f"Error reading file: {e}")
+                    txt.insert("1.0", f"Error reading file: {e}")
 
-                # Bind changes for autosave
-                text_widget.bind("<KeyRelease>", lambda event, p=item_path, w=text_widget: self.autosave_file(p, w))
+                # Autosave on key release
+                txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
 
-    def upload_file(self, target_folder):
+    def build_dockerfile_tabs(self, notebook, base_dir):
         """
-        Upload a file from the user's computer into 'target_folder'.
-        After upload, rebuild the notebook to show the newly added file.
+        For each container with a dockerfile, create a tab that shows that folder’s contents.
         """
-        file_path = filedialog.askopenfilename()
-        if not file_path:
-            return  # user cancelled
+        # We'll gather the unique dockerfile folder names from self.containers
+        dockerfiles = []
+        for c in self.containers:
+            if "dockerfile" in c:
+                df = c["dockerfile"]
+                if df not in dockerfiles:
+                    dockerfiles.append(df)
 
-        file_name = os.path.basename(file_path)
-        dest_path = os.path.join(target_folder, file_name)
-        try:
-            # Copy file
-            with open(file_path, "rb") as src, open(dest_path, "wb") as dst:
-                dst.write(src.read())
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to upload file: {e}")
+        if not dockerfiles:
             return
 
-        messagebox.showinfo("Success", f"Uploaded {file_name} to {target_folder}")
-        # Rebuild the notebook
-        base_dir = os.path.join(os.getcwd(), self.name.get())
-        self.build_files_notebook(base_dir)
+        docker_parent_tab = tk.Frame(notebook, bg="#00304E")
+        notebook.add(docker_parent_tab, text="dockerfiles")
+
+        # A sub-notebook for each dockerfile folder
+        docker_nb = ttk.Notebook(docker_parent_tab)
+        docker_nb.pack(fill="both", expand=True, padx=10, pady=10)
+
+        for df in dockerfiles:
+            df_path = os.path.join(base_dir, df)
+            if not os.path.isdir(df_path):
+                continue
+
+            df_tab = tk.Frame(docker_nb, bg="#00304E")
+            docker_nb.add(df_tab, text=df)
+
+            # "Upload File" button
+            tk.Button(df_tab, text="Upload File",
+                      command=lambda p=df_path: self.upload_file(p, refresh_call=lambda: self.build_top_notebook(
+                          base_dir)),
+                      bg="#214f07", fg="white").pack(anchor="w", pady=5, padx=10)
+
+            # Show folder contents
+            self.build_file_list_notebook(df_tab, df_path, base_dir)
+
+    def build_provisioning_tab(self, notebook, base_dir):
+        """
+        Build a tab for provisioning, listing files and folders in the provisioning directory.
+        """
+        provisioning_path = os.path.join(base_dir, "provisioning")
+        if not os.path.isdir(provisioning_path):
+            return
+
+        tab = tk.Frame(notebook, bg="#00304E")
+        notebook.add(tab, text="provisioning")
+
+        # Upload File button
+        upload_btn = tk.Button(tab, text="Upload File",
+                               command=lambda: self.upload_file(provisioning_path,
+                                                                refresh_call=lambda: self.build_top_notebook(base_dir)),
+                               bg="#214f07", fg="white")
+        upload_btn.pack(anchor="w", pady=5, padx=10)
+
+        # Sub-notebook to show files and folders in provisioning
+        sub_nb = ttk.Notebook(tab)
+        sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Populate the sub-notebook with files and folders
+        for item in sorted(os.listdir(provisioning_path)):
+            item_path = os.path.join(provisioning_path, item)
+            if os.path.isfile(item_path):
+                file_tab = tk.Frame(sub_nb, bg="#00304E")
+                sub_nb.add(file_tab, text=item)
+
+                txt = tk.Text(file_tab, wrap="word", bg="#333333", fg="white")
+                txt.pack(fill="both", expand=True)
+
+                # Load the file
+                try:
+                    with open(item_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    txt.insert("1.0", content)
+                except Exception as e:
+                    txt.insert("1.0", f"Error reading file: {e}")
+
+                # Autosave on key release
+                txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
+
+    def build_roles_tab(self, notebook, base_dir):
+        """
+        A new 'roles' tab, with:
+         1) Upload File button
+         2) Show folders/files from 'provisioning/roles'
+         3) Easy editing with autosave
+        """
+        roles_path = os.path.join(base_dir, "provisioning", "roles")
+        if not os.path.isdir(roles_path):
+            return
+
+        tab = tk.Frame(notebook, bg="#00304E")
+        notebook.add(tab, text="roles")
+
+        # Upload file button for the entire roles folder
+        tk.Button(
+            tab, text="Upload File",
+            command=lambda: self.upload_file(roles_path,
+                                             refresh_call=lambda: self.build_top_notebook(base_dir)),
+            bg="#214f07", fg="white"
+        ).pack(anchor="w", padx=5, pady=5)
+
+        # A sub-notebook showing each host subfolder
+        nb = ttk.Notebook(tab)
+        nb.pack(fill="both", expand=True, padx=10, pady=10)
+
+        for item in sorted(os.listdir(roles_path)):
+            item_path = os.path.join(roles_path, item)
+            if os.path.isdir(item_path):
+                host_tab = tk.Frame(nb, bg="#00304E")
+                nb.add(host_tab, text=item)
+
+                # Now handle the host, with subfolders, etc.
+                self.build_host_subfolders(host_tab, item_path, base_dir)
+
+    def build_host_subfolders(self, parent, folder_path, base_dir):
+        """
+        A new function that:
+          1) Has 'Upload File' in the host tab
+          2) Possibly more upload file buttons in subfolders
+          3) Shows the folders/files from 'folder_path'
+          4) Allows easy editing + autosave
+        """
+        # 1) Upload File button at the host level
+        tk.Button(
+            parent, text="Upload File",
+            command=lambda: self.upload_file(folder_path,
+                                             refresh_call=lambda: self.build_top_notebook(base_dir)),
+            bg="#214f07", fg="white"
+        ).pack(anchor="w", padx=5, pady=5)
+
+        # 2) We'll show each subfolder as a sub-tab, each file in an editable text widget
+        nb = ttk.Notebook(parent)
+        nb.pack(fill="both", expand=True)
+
+        for sub_item in sorted(os.listdir(folder_path)):
+            sub_item_path = os.path.join(folder_path, sub_item)
+            if os.path.isdir(sub_item_path):
+                # Another subfolder => create a sub-tab
+                s_tab = tk.Frame(nb, bg="#00304E")
+                nb.add(s_tab, text=sub_item)
+
+                # Upload File in the subfolder tab
+                tk.Button(
+                    s_tab, text="Upload File",
+                    command=lambda p=sub_item_path: self.upload_file(p,
+                                                                     refresh_call=lambda: self.build_top_notebook(
+                                                                         base_dir)),
+                    bg="#214f07", fg="white"
+                ).pack(anchor="w", padx=5, pady=5)
+
+                # Now show files in sub_item_path
+                self.build_file_editor_list(s_tab, sub_item_path, base_dir)
+            else:
+                # It's a file in the host folder => we could handle that as well
+                # For brevity, we skip or you can place them in a 'host file' tab
+                pass
+
+    def build_file_editor_list(self, parent, folder_path, base_dir):
+        """
+        Show each file in 'folder_path' in an editor tab, with autosave
+        """
+        nb = ttk.Notebook(parent)
+        nb.pack(fill="both", expand=True)
+
+        for f in sorted(os.listdir(folder_path)):
+            f_path = os.path.join(folder_path, f)
+            if os.path.isfile(f_path):
+                ftab = tk.Frame(nb, bg="#00304E")
+                nb.add(ftab, text=f)
+
+                txt = tk.Text(ftab, bg="#333333", fg="white", wrap="word")
+                txt.pack(fill="both", expand=True)
+                try:
+                    with open(f_path, "r", encoding="utf-8") as openf:
+                        content = openf.read()
+                    txt.insert("1.0", content)
+                except Exception as e:
+                    txt.insert("1.0", f"Error reading file: {e}")
+
+                txt.bind("<KeyRelease>", lambda e, p=f_path, w=txt: self.autosave_file(p, w))
+
+    def build_file_list_notebook(self, parent, folder_path, base_dir):
+        """
+        Create a sub-notebook listing each file in folder_path. Each file tab is editable with autosave.
+        """
+        nb = ttk.Notebook(parent)
+        nb.pack(fill="both", expand=True)
+
+        items = sorted(os.listdir(folder_path))
+        for item in items:
+            item_path = os.path.join(folder_path, item)
+            if os.path.isfile(item_path):
+                tab = tk.Frame(nb, bg="#00304E")
+                nb.add(tab, text=item)
+
+                txt = tk.Text(tab, bg="#333333", fg="white", wrap="word")
+                txt.pack(fill="both", expand=True)
+
+                try:
+                    with open(item_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    txt.insert("1.0", content)
+                except Exception as e:
+                    txt.insert("1.0", f"Error reading file: {e}")
+
+                # Autosave
+                txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
+
+    # ---------------------------------------------------------------------
+    # File upload / autosave
+    # ---------------------------------------------------------------------
+    def upload_file(self, target_folder, refresh_call=None):
+        """
+        O singură funcție ce permite încărcarea EITHER a unui fișier SAU a unui folder.
+        - Folder: se copiază recursiv (copytree).
+        - Fișier: se copiază binar.
+        - După upload, vom face partial_refresh_folder (fără să ștergem tab-urile vechi).
+        """
+        is_folder = messagebox.askyesno(
+            "Upload choice",
+            "Upload folder? (Yes=Folder, No=File)"
+        )
+        if is_folder:
+            folder_path = filedialog.askdirectory()
+            if not folder_path:
+                return
+            folder_name = os.path.basename(folder_path)
+            dest = os.path.join(target_folder, folder_name)
+            if os.path.exists(dest):
+                messagebox.showerror("Error", f"Folder '{folder_name}' already exists!")
+                return
+            try:
+                shutil.copytree(folder_path, dest)
+                messagebox.showinfo("Success", f"Uploaded folder '{folder_name}' to {target_folder}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to upload folder: {e}")
+                return
+        else:
+            file_path = filedialog.askopenfilename()
+            if not file_path:
+                return
+            fname = os.path.basename(file_path)
+            dest = os.path.join(target_folder, fname)
+            try:
+                with open(file_path, "rb") as src, open(dest, "wb") as dst:
+                    dst.write(src.read())
+                messagebox.showinfo("Success", f"Uploaded file '{fname}' to {target_folder}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to upload file: {e}")
+                return
+
+        # Aici, în loc să reconstruim TOT, facem partial refresh
+        self.partial_refresh_folder(target_folder)
+
+        if callable(refresh_call):
+            refresh_call()
+
+    def partial_refresh_folder(self, sub_notebook, folder_path):
+        """
+        Enumerăm fișierele/folderele curente din folder_path.
+        Verificăm tab-urile existente din sub_notebook.
+        Dacă găsim iteme noi, creăm tab-uri noi.
+        NU ștergem tab-urile deja existente => cumulăm.
+        """
+        # 1) Colectăm numele tab-urilor deja existente
+        existing_tabs = []
+        for i in range(sub_notebook.index("end")):  # parcurge index-urile tuturor tab-urilor
+            existing_tabs.append(sub_notebook.tab(i, "text"))  # ia text-ul tab-ului (numele afișat)
+
+        # 2) Urcăm fișierele/folderele actuale din folder_path
+        all_items = sorted(os.listdir(folder_path))
+        for item in all_items:
+            # Dacă item-ul e deja tab, îl sărim
+            if item in existing_tabs:
+                continue
+
+            item_path = os.path.join(folder_path, item)
+            # dacă e fișier, creăm un tab nou cu editor
+            if os.path.isfile(item_path):
+                new_tab = tk.Frame(sub_notebook, bg="#00304E")
+                sub_notebook.add(new_tab, text=item)
+
+                txt = tk.Text(new_tab, bg="#333333", fg="white", wrap="word")
+                txt.pack(fill="both", expand=True)
+
+                # Încarcă fișierul
+                try:
+                    with open(item_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    txt.insert("1.0", content)
+                except Exception as e:
+                    txt.insert("1.0", f"Error reading file: {e}")
+
+                # autosave
+                txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
+
+            elif os.path.isdir(item_path):
+                # dacă e folder, creăm un tab nou => tot tu decizi dacă-l tratezi tot ca fișier
+                # sau creezi un sub-notebook
+                new_tab = tk.Frame(sub_notebook, bg="#00304E")
+                sub_notebook.add(new_tab, text=item)
+
+                # eventual, poți crea un sub-sub-notebook care enumeră fișierele
+                # sau apelezi direct partial_refresh_folder => recursiv
+                new_sub_nb = ttk.Notebook(new_tab)
+                new_sub_nb.pack(fill="both", expand=True)
+
+                # Afișăm conținutul folderului proaspăt adăugat
+                # punem un Upload File / Folder buton?
+                tk.Button(
+                    new_tab, text="Upload File or Folder",
+                    command=lambda p=item_path: self.upload_file(p, new_sub_nb),
+                    bg="#214f07", fg="white"
+                ).pack(anchor="w", padx=5, pady=5)
+
+                # adaugă conținutul folderului
+                self.partial_refresh_folder(new_sub_nb, item_path)
 
     def autosave_file(self, file_path, text_widget):
-        """
-        Automatically save the file whenever the text changes.
-        """
         try:
             content = text_widget.get("1.0", tk.END)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
-        except Exception as e:
-            # If we fail to autosave, optionally show error or ignore
+        except Exception:
             pass
 
 
