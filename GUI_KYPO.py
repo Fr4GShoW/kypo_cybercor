@@ -841,42 +841,18 @@ class TopologyApp:
 
         self.build_top_notebook(base_dir)
 
-    def build_top_notebook(self, base_dir):
-        existing = getattr(self, "top_notebook", None)
-        if existing:
-            existing.destroy()
-
-        self.top_notebook = ttk.Notebook(self.main_frame)
-        self.top_notebook.pack(fill="both", expand=True, pady=10)
-
-        self.build_main_folder_tab(self.top_notebook, base_dir)
-        self.build_dockerfile_tabs(self.top_notebook, base_dir)
-        self.build_provisioning_tab(self.top_notebook, base_dir)
-        self.build_roles_tab(self.top_notebook, base_dir)
-        if getattr(self, 'footer_label', None):
-            self.footer_label.destroy()
-        self.footer_label = tk.Label(
-            self.main_frame,
-            text="Copyright Made by Gabriel Tăbăcaru for CYBERCOR",
-            bg="#00304E", fg="white"
-        )
-        self.footer_label.pack(side='bottom', fill='x', pady=5)
-
     # ---------------------------------------------------------------------
     # Build the "top notebook" at the top of the whole app with your tabs:
-    #  1) main_folder
-    #  2) dockerfile_folders
-    #  3) provisioning
-    #     (subtabs: each host, containing subtabs: files, tasks, vars)
     # ---------------------------------------------------------------------
     def build_top_notebook(self, base_dir):
         """
         Create a top-level Notebook with the tabs you require:
-         - Main Folder (topology.yml, containers.yml)
-         - Dockerfiles (one tab per dockerfile folder)
-         - Provisioning (subtabs per host -> files, tasks, vars)
+         - Main Folder (topology.yml, containers.yml, plus any other files/folders).
+         - Dockerfiles (one tab per dockerfile folder).
+         - Provisioning
+         - Roles (subfolders per host).
+         - Footer label
         """
-        # If we already built a top-level notebook, remove it first
         existing = getattr(self, "top_notebook", None)
         if existing:
             existing.destroy()
@@ -884,17 +860,19 @@ class TopologyApp:
         self.top_notebook = ttk.Notebook(self.main_frame)
         self.top_notebook.pack(fill="both", expand=True, pady=10)
 
-        # 1) Tab: main_folder
+        # 1) Tab: main_folder (show base_dir contents)
         self.build_main_folder_tab(self.top_notebook, base_dir)
 
         # 2) Tab: dockerfile_folders
         self.build_dockerfile_tabs(self.top_notebook, base_dir)
 
-        # 3) Tab: provisioning (with host subfolders)
+        # 3) Tab: provisioning
         self.build_provisioning_tab(self.top_notebook, base_dir)
-        # 4) Tab: roles (with host subfolders)
+
+        # 4) Tab: roles
         self.build_roles_tab(self.top_notebook, base_dir)
-        # 5) Footer label (updated after tabs)
+
+        # 5) Footer label
         if getattr(self, 'footer_label', None):
             self.footer_label.destroy()
         self.footer_label = tk.Label(
@@ -905,62 +883,53 @@ class TopologyApp:
         self.footer_label.pack(side='bottom', fill='x', pady=5)
 
     def build_main_folder_tab(self, notebook, base_dir):
+        """
+        A tab that shows the contents of base_dir (the 'main folder').
+        Folders become sub-tabs, files are directly editable with autosave.
+        """
         tab = tk.Frame(notebook, bg="#00304E")
         notebook.add(tab, text="main_folder")
 
-        # Show topology.yml, containers.yml if they exist
-        # plus an "upload file" button to add new files in the main folder
-        upload_btn = tk.Button(tab, text="Upload File",
-                               command=lambda: self.upload_file(base_dir,
-                                                                refresh_call=lambda: self.build_top_notebook(base_dir)),
-                               bg="#214f07", fg="white")
+        # "Upload File/Folder" button
+        upload_btn = tk.Button(
+            tab, text="Upload File/Folder",
+            command=lambda: self.upload_file_or_folder(base_dir,
+                                                       refresh_call=lambda: self.build_top_notebook(base_dir)),
+            bg="#214f07", fg="white"
+        )
         upload_btn.pack(anchor="w", pady=5, padx=10)
 
-        # We can show each file in the main folder in a sub-notebook
+        # "Delete File/Folder" button
+        delete_btn = tk.Button(
+            tab, text="Delete File/Folder",
+            command=lambda: self.delete_file_or_folder(base_dir,
+                                                       refresh_call=lambda: self.build_top_notebook(base_dir)),
+            bg="#820000", fg="white"
+        )
+        delete_btn.pack(anchor="w", pady=5, padx=10)
+
+        # Build a sub-notebook to display the contents
         sub_nb = ttk.Notebook(tab)
         sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # List all items in base_dir
-        for item in sorted(os.listdir(base_dir)):
-            item_path = os.path.join(base_dir, item)
-            # If it's a file, create a tab
-            if os.path.isfile(item_path):
-                file_tab = tk.Frame(sub_nb, bg="#00304E")
-                sub_nb.add(file_tab, text=item)
-
-                txt = tk.Text(file_tab, wrap="word", bg="#333333", fg="white")
-                txt.pack(fill="both", expand=True)
-
-                # Load the file
-                try:
-                    with open(item_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    txt.insert("1.0", content)
-                except Exception as e:
-                    txt.insert("1.0", f"Error reading file: {e}")
-
-                # Autosave on key release
-                txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
+        self.build_folder_content_tabs(sub_nb, base_dir, base_dir)
 
     def build_dockerfile_tabs(self, notebook, base_dir):
         """
-        For each container with a dockerfile, create a tab that shows that folder’s contents.
+        For each container with a dockerfile, create a sub-tab that shows that folder’s contents.
         """
-        # We'll gather the unique dockerfile folder names from self.containers
         dockerfiles = []
         for c in self.containers:
             if "dockerfile" in c:
                 df = c["dockerfile"]
                 if df not in dockerfiles:
                     dockerfiles.append(df)
-
         if not dockerfiles:
             return
 
         docker_parent_tab = tk.Frame(notebook, bg="#00304E")
         notebook.add(docker_parent_tab, text="dockerfiles")
 
-        # A sub-notebook for each dockerfile folder
         docker_nb = ttk.Notebook(docker_parent_tab)
         docker_nb.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -972,18 +941,32 @@ class TopologyApp:
             df_tab = tk.Frame(docker_nb, bg="#00304E")
             docker_nb.add(df_tab, text=df)
 
-            # "Upload File" button
-            tk.Button(df_tab, text="Upload File",
-                      command=lambda p=df_path: self.upload_file(p, refresh_call=lambda: self.build_top_notebook(
-                          base_dir)),
-                      bg="#214f07", fg="white").pack(anchor="w", pady=5, padx=10)
+            # "Upload File/Folder" in the dockerfile folder
+            tk.Button(
+                df_tab, text="Upload File/Folder",
+                command=lambda p=df_path: self.upload_file_or_folder(
+                    p, refresh_call=lambda: self.build_top_notebook(base_dir)
+                ),
+                bg="#214f07", fg="white"
+            ).pack(anchor="w", pady=5, padx=10)
+
+            # "Delete File/Folder"
+            tk.Button(
+                df_tab, text="Delete File/Folder",
+                command=lambda p=df_path: self.delete_file_or_folder(
+                    p, refresh_call=lambda: self.build_top_notebook(base_dir)
+                ),
+                bg="#820000", fg="white"
+            ).pack(anchor="w", pady=5, padx=10)
 
             # Show folder contents
-            self.build_file_list_notebook(df_tab, df_path, base_dir)
+            sub_nb = ttk.Notebook(df_tab)
+            sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
+            self.build_folder_content_tabs(sub_nb, df_path, base_dir)
 
     def build_provisioning_tab(self, notebook, base_dir):
         """
-        Build a tab for provisioning, listing files and folders in the provisioning directory.
+        Build a tab for 'provisioning/', enumerating its contents similarly.
         """
         provisioning_path = os.path.join(base_dir, "provisioning")
         if not os.path.isdir(provisioning_path):
@@ -992,44 +975,30 @@ class TopologyApp:
         tab = tk.Frame(notebook, bg="#00304E")
         notebook.add(tab, text="provisioning")
 
-        # Upload File button
-        upload_btn = tk.Button(tab, text="Upload File",
-                               command=lambda: self.upload_file(provisioning_path,
-                                                                refresh_call=lambda: self.build_top_notebook(base_dir)),
-                               bg="#214f07", fg="white")
-        upload_btn.pack(anchor="w", pady=5, padx=10)
+        tk.Button(
+            tab, text="Upload File/Folder",
+            command=lambda: self.upload_file_or_folder(
+                provisioning_path, refresh_call=lambda: self.build_top_notebook(base_dir)
+            ),
+            bg="#214f07", fg="white"
+        ).pack(anchor="w", pady=5, padx=10)
 
-        # Sub-notebook to show files and folders in provisioning
+        tk.Button(
+            tab, text="Delete File/Folder",
+            command=lambda: self.delete_file_or_folder(
+                provisioning_path, refresh_call=lambda: self.build_top_notebook(base_dir)
+            ),
+            bg="#820000", fg="white"
+        ).pack(anchor="w", pady=5, padx=10)
+
         sub_nb = ttk.Notebook(tab)
         sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Populate the sub-notebook with files and folders
-        for item in sorted(os.listdir(provisioning_path)):
-            item_path = os.path.join(provisioning_path, item)
-            if os.path.isfile(item_path):
-                file_tab = tk.Frame(sub_nb, bg="#00304E")
-                sub_nb.add(file_tab, text=item)
-
-                txt = tk.Text(file_tab, wrap="word", bg="#333333", fg="white")
-                txt.pack(fill="both", expand=True)
-
-                # Load the file
-                try:
-                    with open(item_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    txt.insert("1.0", content)
-                except Exception as e:
-                    txt.insert("1.0", f"Error reading file: {e}")
-
-                # Autosave on key release
-                txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
+        self.build_folder_content_tabs(sub_nb, provisioning_path, base_dir)
 
     def build_roles_tab(self, notebook, base_dir):
         """
-        A new 'roles' tab, with:
-         1) Upload File button
-         2) Show folders/files from 'provisioning/roles'
-         3) Easy editing with autosave
+        Tab for 'provisioning/roles', enumerating subfolders (one per host).
         """
         roles_path = os.path.join(base_dir, "provisioning", "roles")
         if not os.path.isdir(roles_path):
@@ -1038,111 +1007,76 @@ class TopologyApp:
         tab = tk.Frame(notebook, bg="#00304E")
         notebook.add(tab, text="roles")
 
-        # Upload file button for the entire roles folder
         tk.Button(
-            tab, text="Upload File",
-            command=lambda: self.upload_file(roles_path,
-                                             refresh_call=lambda: self.build_top_notebook(base_dir)),
+            tab, text="Upload File/Folder",
+            command=lambda: self.upload_file_or_folder(
+                roles_path, refresh_call=lambda: self.build_top_notebook(base_dir)
+            ),
             bg="#214f07", fg="white"
-        ).pack(anchor="w", padx=5, pady=5)
+        ).pack(anchor="w", pady=5, padx=10)
 
-        # A sub-notebook showing each host subfolder
+        tk.Button(
+            tab, text="Delete File/Folder",
+            command=lambda: self.delete_file_or_folder(
+                roles_path, refresh_call=lambda: self.build_top_notebook(base_dir)
+            ),
+            bg="#820000", fg="white"
+        ).pack(anchor="w", pady=5, padx=10)
+
         nb = ttk.Notebook(tab)
         nb.pack(fill="both", expand=True, padx=10, pady=10)
 
-        for item in sorted(os.listdir(roles_path)):
+        # Each subfolder for a host => separate tab
+        items = sorted(os.listdir(roles_path))
+        for item in items:
             item_path = os.path.join(roles_path, item)
             if os.path.isdir(item_path):
                 host_tab = tk.Frame(nb, bg="#00304E")
                 nb.add(host_tab, text=item)
 
-                # Now handle the host, with subfolders, etc.
-                self.build_host_subfolders(host_tab, item_path, base_dir)
-
-    def build_host_subfolders(self, parent, folder_path, base_dir):
-        """
-        A new function that:
-          1) Has 'Upload File' in the host tab
-          2) Possibly more upload file buttons in subfolders
-          3) Shows the folders/files from 'folder_path'
-          4) Allows easy editing + autosave
-        """
-        # 1) Upload File button at the host level
-        tk.Button(
-            parent, text="Upload File",
-            command=lambda: self.upload_file(folder_path,
-                                             refresh_call=lambda: self.build_top_notebook(base_dir)),
-            bg="#214f07", fg="white"
-        ).pack(anchor="w", padx=5, pady=5)
-
-        # 2) We'll show each subfolder as a sub-tab, each file in an editable text widget
-        nb = ttk.Notebook(parent)
-        nb.pack(fill="both", expand=True)
-
-        for sub_item in sorted(os.listdir(folder_path)):
-            sub_item_path = os.path.join(folder_path, sub_item)
-            if os.path.isdir(sub_item_path):
-                # Another subfolder => create a sub-tab
-                s_tab = tk.Frame(nb, bg="#00304E")
-                nb.add(s_tab, text=sub_item)
-
-                # Upload File in the subfolder tab
+                # Upload in the host tab
                 tk.Button(
-                    s_tab, text="Upload File",
-                    command=lambda p=sub_item_path: self.upload_file(p,
-                                                                     refresh_call=lambda: self.build_top_notebook(
-                                                                         base_dir)),
+                    host_tab, text="Upload File/Folder",
+                    command=lambda p=item_path: self.upload_file_or_folder(
+                        p, refresh_call=lambda: self.build_top_notebook(base_dir)
+                    ),
                     bg="#214f07", fg="white"
                 ).pack(anchor="w", padx=5, pady=5)
 
-                # Now show files in sub_item_path
-                self.build_file_editor_list(s_tab, sub_item_path, base_dir)
-            else:
-                # It's a file in the host folder => we could handle that as well
-                # For brevity, we skip or you can place them in a 'host file' tab
-                pass
+                # Delete in the host tab
+                tk.Button(
+                    host_tab, text="Delete File/Folder",
+                    command=lambda p=item_path: self.delete_file_or_folder(
+                        p, refresh_call=lambda: self.build_top_notebook(base_dir)
+                    ),
+                    bg="#820000", fg="white"
+                ).pack(anchor="w", padx=5, pady=5)
 
-    def build_file_editor_list(self, parent, folder_path, base_dir):
+                sub_nb = ttk.Notebook(host_tab)
+                sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
+
+                # Build content recursively
+                self.build_folder_content_tabs(sub_nb, item_path, base_dir)
+
+    # ---------------------------------------------------------------------
+    # The core function to list folder contents in sub-tabs (files, subfolders).
+    # ---------------------------------------------------------------------
+    def build_folder_content_tabs(self, notebook, folder_path, base_dir):
         """
-        Show each file in 'folder_path' in an editor tab, with autosave
+        Goes through folder_path, and for each file => create a text-editing tab with autosave.
+        For each subfolder => create a sub-tab with an "Upload File/Folder" and "Delete File/Folder" button,
+        then recursively call build_folder_content_tabs.
         """
-        nb = ttk.Notebook(parent)
-        nb.pack(fill="both", expand=True)
-
-        for f in sorted(os.listdir(folder_path)):
-            f_path = os.path.join(folder_path, f)
-            if os.path.isfile(f_path):
-                ftab = tk.Frame(nb, bg="#00304E")
-                nb.add(ftab, text=f)
-
-                txt = tk.Text(ftab, bg="#333333", fg="white", wrap="word")
-                txt.pack(fill="both", expand=True)
-                try:
-                    with open(f_path, "r", encoding="utf-8") as openf:
-                        content = openf.read()
-                    txt.insert("1.0", content)
-                except Exception as e:
-                    txt.insert("1.0", f"Error reading file: {e}")
-
-                txt.bind("<KeyRelease>", lambda e, p=f_path, w=txt: self.autosave_file(p, w))
-
-    def build_file_list_notebook(self, parent, folder_path, base_dir):
-        """
-        Create a sub-notebook listing each file in folder_path. Each file tab is editable with autosave.
-        """
-        nb = ttk.Notebook(parent)
-        nb.pack(fill="both", expand=True)
-
         items = sorted(os.listdir(folder_path))
         for item in items:
             item_path = os.path.join(folder_path, item)
             if os.path.isfile(item_path):
-                tab = tk.Frame(nb, bg="#00304E")
-                nb.add(tab, text=item)
+                # File => show an editor
+                tab = tk.Frame(notebook, bg="#00304E")
+                notebook.add(tab, text=item)
 
                 txt = tk.Text(tab, bg="#333333", fg="white", wrap="word")
                 txt.pack(fill="both", expand=True)
-
                 try:
                     with open(item_path, "r", encoding="utf-8") as f:
                         content = f.read()
@@ -1153,28 +1087,52 @@ class TopologyApp:
                 # Autosave
                 txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
 
+            elif os.path.isdir(item_path):
+                # Subfolder => create a sub-tab with a sub-notebook
+                folder_tab = tk.Frame(notebook, bg="#00304E")
+                notebook.add(folder_tab, text=item)
+
+                tk.Button(
+                    folder_tab, text="Upload File/Folder",
+                    command=lambda p=item_path: self.upload_file_or_folder(
+                        p, refresh_call=lambda: self.build_top_notebook(base_dir)
+                    ),
+                    bg="#214f07", fg="white"
+                ).pack(anchor="w", padx=5, pady=5)
+
+                tk.Button(
+                    folder_tab, text="Delete File/Folder",
+                    command=lambda p=item_path: self.delete_file_or_folder(
+                        p, refresh_call=lambda: self.build_top_notebook(base_dir)
+                    ),
+                    bg="#820000", fg="white"
+                ).pack(anchor="w", padx=5, pady=5)
+
+                sub_nb = ttk.Notebook(folder_tab)
+                sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
+
+                self.build_folder_content_tabs(sub_nb, item_path, base_dir)
+
     # ---------------------------------------------------------------------
-    # File upload / autosave
+    # File/folder upload and autosave
     # ---------------------------------------------------------------------
-    def upload_file(self, target_folder, refresh_call=None):
+    def upload_file_or_folder(self, target_folder, refresh_call=None):
         """
-        O singură funcție ce permite încărcarea EITHER a unui fișier SAU a unui folder.
-        - Folder: se copiază recursiv (copytree).
-        - Fișier: se copiază binar.
-        - După upload, vom face partial_refresh_folder (fără să ștergem tab-urile vechi).
+        Allows uploading either a file or an entire folder (recursively).
+        After upload, calls a full rebuild (refresh_call).
         """
         is_folder = messagebox.askyesno(
             "Upload choice",
             "Upload folder? (Yes=Folder, No=File)"
         )
         if is_folder:
-            folder_path = filedialog.askdirectory()
+            folder_path = filedialog.askdirectory(initialdir=target_folder)
             if not folder_path:
                 return
             folder_name = os.path.basename(folder_path)
             dest = os.path.join(target_folder, folder_name)
             if os.path.exists(dest):
-                messagebox.showerror("Error", f"Folder '{folder_name}' already exists!")
+                messagebox.showerror("Error", f"Folder '{folder_name}' already exists in:\n{target_folder}")
                 return
             try:
                 shutil.copytree(folder_path, dest)
@@ -1183,11 +1141,14 @@ class TopologyApp:
                 messagebox.showerror("Error", f"Failed to upload folder: {e}")
                 return
         else:
-            file_path = filedialog.askopenfilename()
+            file_path = filedialog.askopenfilename(initialdir=target_folder)
             if not file_path:
                 return
             fname = os.path.basename(file_path)
             dest = os.path.join(target_folder, fname)
+            if os.path.exists(dest):
+                messagebox.showerror("Error", f"File '{fname}' already exists in:\n{target_folder}")
+                return
             try:
                 with open(file_path, "rb") as src, open(dest, "wb") as dst:
                     dst.write(src.read())
@@ -1196,79 +1157,89 @@ class TopologyApp:
                 messagebox.showerror("Error", f"Failed to upload file: {e}")
                 return
 
-        # Aici, în loc să reconstruim TOT, facem partial refresh
-        self.partial_refresh_folder(target_folder)
+        if callable(refresh_call):
+            refresh_call()
+            # --- Switch to the last tab in top_notebook, then scroll to top ---
+            self.root.update_idletasks()
+            tabs = self.top_notebook.tabs()
+            if tabs:
+                self.top_notebook.select(tabs[-1])
+            # Scroll to top, so the UI appears as in the 1st photo
+            self.canvas.yview_moveto(0.0)
+
+    def delete_file_or_folder(self, target_folder, refresh_call=None):
+        """
+        Allows deleting either a file or an entire folder (recursively).
+        We ensure the chosen path is indeed within target_folder before deleting,
+        to avoid accidental deletion outside the project.
+        After deletion, calls a full rebuild (refresh_call).
+        """
+        is_folder = messagebox.askyesno(
+            "Delete choice",
+            "Delete folder? (Yes=Folder, No=File)"
+        )
+
+        # Let user pick either a folder or file, but ensure it is inside target_folder
+        if is_folder:
+            folder_path = filedialog.askdirectory(initialdir=target_folder)
+            if not folder_path:
+                return
+
+            # Convert both to absolute paths:
+            folder_abs = os.path.abspath(folder_path)
+            target_abs = os.path.abspath(target_folder)
+
+            # Check if folder_abs is inside target_abs
+            if not (folder_abs == target_abs or folder_abs.startswith(target_abs + os.sep)):
+                messagebox.showerror("Error", "Selected folder is not inside the target directory!")
+                return
+
+            try:
+                shutil.rmtree(folder_abs)
+                messagebox.showinfo("Success", f"Deleted folder:\n{folder_abs}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete folder: {e}")
+                return
+        else:
+            file_path = filedialog.askopenfilename(initialdir=target_folder)
+            if not file_path:
+                return
+
+            file_abs = os.path.abspath(file_path)
+            target_abs = os.path.abspath(target_folder)
+
+            # Check if file_abs is inside target_abs
+            if not (file_abs == target_abs or file_abs.startswith(target_abs + os.sep)):
+                messagebox.showerror("Error", "Selected file is not inside the target directory!")
+                return
+
+            try:
+                os.remove(file_abs)
+                messagebox.showinfo("Success", f"Deleted file:\n{file_abs}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete file: {e}")
+                return
 
         if callable(refresh_call):
             refresh_call()
-
-    def partial_refresh_folder(self, sub_notebook, folder_path):
-        """
-        Enumerăm fișierele/folderele curente din folder_path.
-        Verificăm tab-urile existente din sub_notebook.
-        Dacă găsim iteme noi, creăm tab-uri noi.
-        NU ștergem tab-urile deja existente => cumulăm.
-        """
-        # 1) Colectăm numele tab-urilor deja existente
-        existing_tabs = []
-        for i in range(sub_notebook.index("end")):  # parcurge index-urile tuturor tab-urilor
-            existing_tabs.append(sub_notebook.tab(i, "text"))  # ia text-ul tab-ului (numele afișat)
-
-        # 2) Urcăm fișierele/folderele actuale din folder_path
-        all_items = sorted(os.listdir(folder_path))
-        for item in all_items:
-            # Dacă item-ul e deja tab, îl sărim
-            if item in existing_tabs:
-                continue
-
-            item_path = os.path.join(folder_path, item)
-            # dacă e fișier, creăm un tab nou cu editor
-            if os.path.isfile(item_path):
-                new_tab = tk.Frame(sub_notebook, bg="#00304E")
-                sub_notebook.add(new_tab, text=item)
-
-                txt = tk.Text(new_tab, bg="#333333", fg="white", wrap="word")
-                txt.pack(fill="both", expand=True)
-
-                # Încarcă fișierul
-                try:
-                    with open(item_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    txt.insert("1.0", content)
-                except Exception as e:
-                    txt.insert("1.0", f"Error reading file: {e}")
-
-                # autosave
-                txt.bind("<KeyRelease>", lambda e, p=item_path, w=txt: self.autosave_file(p, w))
-
-            elif os.path.isdir(item_path):
-                # dacă e folder, creăm un tab nou => tot tu decizi dacă-l tratezi tot ca fișier
-                # sau creezi un sub-notebook
-                new_tab = tk.Frame(sub_notebook, bg="#00304E")
-                sub_notebook.add(new_tab, text=item)
-
-                # eventual, poți crea un sub-sub-notebook care enumeră fișierele
-                # sau apelezi direct partial_refresh_folder => recursiv
-                new_sub_nb = ttk.Notebook(new_tab)
-                new_sub_nb.pack(fill="both", expand=True)
-
-                # Afișăm conținutul folderului proaspăt adăugat
-                # punem un Upload File / Folder buton?
-                tk.Button(
-                    new_tab, text="Upload File or Folder",
-                    command=lambda p=item_path: self.upload_file(p, new_sub_nb),
-                    bg="#214f07", fg="white"
-                ).pack(anchor="w", padx=5, pady=5)
-
-                # adaugă conținutul folderului
-                self.partial_refresh_folder(new_sub_nb, item_path)
+            # --- Switch to the last tab in top_notebook, then scroll to top ---
+            self.root.update_idletasks()
+            tabs = self.top_notebook.tabs()
+            if tabs:
+                self.top_notebook.select(tabs[-1])
+            # Scroll to top, so the UI appears as in the 1st photo
+            self.canvas.yview_moveto(0.0)
 
     def autosave_file(self, file_path, text_widget):
+        """
+        Write contents of 'text_widget' to 'file_path' on each key release.
+        """
         try:
             content = text_widget.get("1.0", tk.END)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
         except Exception:
+            # We could show an error, but let's keep silent or log if desired.
             pass
 
 
